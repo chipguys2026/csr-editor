@@ -1,7 +1,12 @@
 import { useEffect, useState, useRef, Fragment } from 'react'
 import { useForm } from 'react-hook-form'
 
-import { normalizeRegister } from '@/lib/register'
+import {
+  normalizeRegister,
+  getFieldWidth,
+  calcTotalBitsUsed,
+  formatBitRange,
+} from '@/lib/register'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -38,12 +43,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { hex } from '@/lib/number-formating'
-
-/* ---------------- helpers ---------------- */
-const width = (f) => f.bitRange.msb - f.bitRange.lsb + 1
-
-const calcTotalBitsUsed = (fields) =>
-  fields.reduce((sum, f) => sum + width(f), 0)
 
 const handleKeyDown = (e) => {
   const row = Number(e.currentTarget.dataset.row)
@@ -94,19 +93,17 @@ const FieldName = ({ field, isEditing, rf, watch }) => {
 const FieldBitRange = ({ field, isEditing, setValue, isOverlap }) => {
   const inputRef = useRef(null)
 
-  const format = (msb, lsb) => (msb === lsb ? `[${msb}]` : `[${msb}:${lsb}]`)
-
   const [local, setLocal] = useState(
-    format(field.bitRange.msb, field.bitRange.lsb)
+    formatBitRange(field.bitRange.msb, field.bitRange.lsb)
   )
 
-  // sync khi field đổi (insert / reset)
+  // Sync when field changes (insert/reset).
   useEffect(() => {
-    setLocal(format(field.bitRange.msb, field.bitRange.lsb))
+    setLocal(formatBitRange(field.bitRange.msb, field.bitRange.lsb))
   }, [field.bitRange.msb, field.bitRange.lsb])
 
   if (!isEditing) {
-    return <>{format(field.bitRange.msb, field.bitRange.lsb)}</>
+    return <>{formatBitRange(field.bitRange.msb, field.bitRange.lsb)}</>
   }
 
   const onBlur = () => {
@@ -137,7 +134,7 @@ const FieldBitRange = ({ field, isEditing, setValue, isOverlap }) => {
 
     if (invalid) {
       // rollback + refocus
-      toast.error('Invalie bit range')
+      toast.error('Invalid bit range')
       requestAnimationFrame(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
@@ -153,7 +150,7 @@ const FieldBitRange = ({ field, isEditing, setValue, isOverlap }) => {
     )
 
     // normalize display
-    setLocal(format(msb, lsb))
+    setLocal(formatBitRange(msb, lsb))
   }
 
   return (
@@ -219,7 +216,7 @@ const FieldResetValue = ({ field, isEditing, setValue }) => {
     hex(field.resetValue, field.bitRange.msb - field.bitRange.lsb + 1)
   )
 
-  // sync khi field đổi (reset / insert)
+  // Sync when field changes (reset/insert).
   useEffect(() => {
     setLocal(hex(field.resetValue, field.bitRange.msb - field.bitRange.lsb + 1))
   }, [field.resetValue, field.bitRange])
@@ -257,8 +254,8 @@ const FieldResetValue = ({ field, isEditing, setValue }) => {
 
     if (invalid) {
       // rollback + refocus
-      toast.error('Invalie reset value')
-      // setLocal(format(field.resetValue))
+      toast.error('Invalid reset value')
+      // setLocal(hex(field.resetValue, bitWidth))
       requestAnimationFrame(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
@@ -271,8 +268,8 @@ const FieldResetValue = ({ field, isEditing, setValue }) => {
       shouldDirty: true,
     })
 
-    // normalize display (decimal)
-    setLocal(format(parsed))
+    // Normalize display (hex).
+    setLocal(hex(parsed, bitWidth))
   }
 
   return (
@@ -309,6 +306,25 @@ const FieldDesc = ({ field, isEditing, rf }) => {
   )
 }
 
+const FieldInsertLine = ({ show, onClick }) => {
+  if (!show) return null
+
+  return (
+    <tr
+      className='bg-primary text-primary-foreground absolute z-10 flex h-1 w-full cursor-pointer items-center justify-center opacity-0 hover:opacity-100'
+      onClick={onClick}
+    >
+      <td
+        colSpan={6}
+        className='bg-primary flex h-4 w-4 items-center justify-center rounded-xs'
+      >
+        <Plus className='h-3 w-3' />
+      </td>
+    </tr>
+  )
+}
+
+
 export const RegisterDetail = () => {
   const { dataWidth } = useParamStore()
 
@@ -330,7 +346,7 @@ export const RegisterDetail = () => {
     defaultValues: registerData,
   })
 
-  // sync khi đổi register
+  // Sync when register changes.
   useEffect(() => {
     if (registerData) {
       reset(registerData)
@@ -397,7 +413,7 @@ export const RegisterDetail = () => {
     let self = updatedFields[index]
     if (!self) return
     self = { ...self, bitRange: { ...self.bitRange } }
-    const selfWidth = width(self)
+    const selfWidth = getFieldWidth(self)
 
     const otherIndex = direction === 'up' ? index - 1 : index + 1
 
@@ -422,7 +438,7 @@ export const RegisterDetail = () => {
           ? self.bitRange.lsb - 1 == other.bitRange.msb
           : self.bitRange.msb + 1 == other.bitRange.lsb
 
-      const otherWidth = width(other)
+      const otherWidth = getFieldWidth(other)
 
       if (isAdjacent) {
         if (direction == 'up') {
@@ -555,20 +571,11 @@ export const RegisterDetail = () => {
           <TableBody className='relative'>
             {fullFields.map((field, i) => (
               <Fragment key={`registerField${i}`}>
-                {/* INSERT LINE */}
-                {canInsert && fields.length == 0 && (
-                  <tr
-                    className='bg-primary text-primary-foreground absolute z-10 flex h-1 w-full cursor-pointer items-center justify-center opacity-0 hover:opacity-100'
-                    onClick={() => insertField(field.trueIndex)}
-                  >
-                    <td
-                      colSpan={6}
-                      className='bg-primary flex h-4 w-4 items-center justify-center rounded-xs'
-                    >
-                      <Plus className='h-3 w-3' />
-                    </td>
-                  </tr>
-                )}
+                {/* ---------- Insert Line ---------- */}
+                <FieldInsertLine
+                  show={canInsert && fields.length === 0}
+                  onClick={() => insertField(field.trueIndex)}
+                />
 
                 <TableRow
                   className={cn(
@@ -684,20 +691,11 @@ export const RegisterDetail = () => {
                   )}
                 </TableRow>
 
-                {/* INSERT LINE */}
-                {canInsert && field.name !== 'RESERVED' && (
-                  <tr
-                    className='bg-primary text-primary-foreground absolute z-10 flex h-1 w-full cursor-pointer items-center justify-center opacity-0 hover:opacity-100'
-                    onClick={() => insertField(field.trueIndex)}
-                  >
-                    <td
-                      colSpan={6}
-                      className='bg-primary flex h-4 w-4 items-center justify-center rounded-xs'
-                    >
-                      <Plus className='h-3 w-3' />
-                    </td>
-                  </tr>
-                )}
+                {/* ---------- Insert Line ---------- */}
+                <FieldInsertLine
+                  show={canInsert && field.name !== 'RESERVED'}
+                  onClick={() => insertField(field.trueIndex)}
+                />
               </Fragment>
             ))}
           </TableBody>
@@ -706,3 +704,4 @@ export const RegisterDetail = () => {
     </div>
   )
 }
+

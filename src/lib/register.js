@@ -40,3 +40,12 @@ export const normalizeRegister = (fields, regWidth = 32) => {
 
   return result
 }
+
+export const getFieldWidth = (field) =>
+  field.bitRange.msb - field.bitRange.lsb + 1
+
+export const calcTotalBitsUsed = (fields) =>
+  fields.reduce((sum, field) => sum + getFieldWidth(field), 0)
+
+export const formatBitRange = (msb, lsb) =>
+  msb === lsb ? `[${msb}]` : `[${msb}:${lsb}]`
