@@ -19,6 +19,8 @@ export const useRegisterStore = create((set, get) => ({
   // { [addr: number]: register }
   registers: {},
 
+  setRegisters: (registers) => set({ registers: registers ?? {} }),
+
   /* ---------- register level ---------- */
 
   createRegister: (addr) =>

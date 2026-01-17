@@ -1,3 +1,6 @@
+import { useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+
 import useTheme from '@/hooks/use-theme'
 
 import { Sun, Moon, SunMoon } from 'lucide-react'
@@ -7,80 +10,196 @@ import {
   MenubarContent,
   MenubarItem,
   MenubarMenu,
+  MenubarRadioGroup,
+  MenubarRadioItem,
   MenubarSeparator,
-  MenubarShortcut,
+  MenubarSub,
+  MenubarSubContent,
+  MenubarSubTrigger,
   MenubarTrigger,
 } from '@/components/ui/menubar'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+
+import packageInfo from '../../package.json'
+import { useParamStore } from '@/store/params-store'
+import { useRegisterStore } from '@/store/register-store'
+import { useCurrentRegisterStore } from '@/store/current-register-store'
+import { toast } from 'sonner'
+
+const downloadJson = (filename, data) => {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: 'application/json',
+  })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
 
 export const NavBar = () => {
   const { theme, setTheme } = useTheme()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { dataWidth, addrWidth } = useParamStore()
+  const registers = useRegisterStore((state) => state.registers)
+  const setParams = useParamStore((state) => state.setParams)
+  const setRegisters = useRegisterStore((state) => state.setRegisters)
+  const setCurrentRegister = useCurrentRegisterStore(
+    (state) => state.setCurrentRegister
+  )
+  const fileInputRef = useRef(null)
+  const [isPromptOpen, setIsPromptOpen] = useState(false)
+  const viewRoutes = [
+    { label: 'Editor', value: 'editor', path: '/' },
+    { label: 'Document', value: 'document', path: '/document' },
+    { label: 'RTL', value: 'rtl', path: '/rtl' },
+    { label: 'SDC', value: 'sdc', path: '/sdc' },
+  ]
+  const currentView =
+    viewRoutes.find((route) => route.path === location.pathname)?.value ??
+    'editor'
+
+  const onSaveJson = () => {
+    const payload = {
+      metadata: {
+        tool: {
+          name: packageInfo.name,
+          version: packageInfo.version,
+        },
+        generatedAt: new Date().toISOString(),
+      },
+      params: {
+        dataWidth,
+        addrWidth,
+      },
+      registers,
+    }
+
+    downloadJson('csr-editor.json', payload)
+  }
+
+  const onOpenJson = () => {
+    fileInputRef.current?.click()
+  }
+
+  const onFileChange = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const text = await file.text()
+      const payload = JSON.parse(text)
+      const params = payload?.params
+      const importedRegisters = payload?.registers
+
+      if (!params || !importedRegisters) {
+        throw new Error('Invalid JSON shape')
+      }
+
+      const nextDataWidth = Number(params.dataWidth)
+      const nextAddrWidth = Number(params.addrWidth)
+
+      if (Number.isNaN(nextDataWidth) || Number.isNaN(nextAddrWidth)) {
+        throw new Error('Invalid params values')
+      }
+
+      setParams({ dataWidth: nextDataWidth, addrWidth: nextAddrWidth })
+      setRegisters(importedRegisters)
+
+      const addrKeys = Object.keys(importedRegisters)
+      const firstAddr = addrKeys.length
+        ? Math.min(...addrKeys.map((key) => Number(key)))
+        : null
+
+      if (firstAddr != null && !Number.isNaN(firstAddr)) {
+        setCurrentRegister(firstAddr)
+      } else {
+        setCurrentRegister(null)
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error('Failed to open JSON')
+    } finally {
+      event.target.value = ''
+    }
+  }
 
   return (
     <nav className='flex flex-row items-center gap-4 border-b p-2'>
       <h1 className='font-bold'>CSR Editor</h1>
+      <input
+        ref={fileInputRef}
+        type='file'
+        accept='application/json,.json'
+        className='hidden'
+        onChange={onFileChange}
+      />
       <Menubar className='border-0'>
         <MenubarMenu>
           <MenubarTrigger>File</MenubarTrigger>
           <MenubarContent>
-            <MenubarItem>
-              New Tab <MenubarShortcut>⌘T</MenubarShortcut>
-            </MenubarItem>
-            <MenubarItem>New Window</MenubarItem>
+            <MenubarItem onClick={onOpenJson}>Open JSON</MenubarItem>
+            <MenubarItem onClick={onSaveJson}>Save JSON</MenubarItem>
             <MenubarSeparator />
-            <MenubarItem>Share</MenubarItem>
+            <MenubarItem>Export PDF</MenubarItem>
+          </MenubarContent>
+        </MenubarMenu>
+
+        <MenubarMenu>
+          <MenubarTrigger>View</MenubarTrigger>
+          <MenubarContent>
+            <MenubarRadioGroup
+              value={currentView}
+              onValueChange={(value) => {
+                const next = viewRoutes.find((route) => route.value === value)
+                if (next) navigate(next.path)
+              }}
+            >
+              {viewRoutes.map((route) => (
+                <MenubarRadioItem
+                  key={route.value}
+                  value={route.value}
+                >
+                  {route.label}
+                </MenubarRadioItem>
+              ))}
+            </MenubarRadioGroup>
             <MenubarSeparator />
-            <MenubarItem>Print</MenubarItem>
+            <MenubarSub>
+              <MenubarSubTrigger>Theme</MenubarSubTrigger>
+              <MenubarSubContent>
+                <MenubarRadioGroup
+                  value={theme}
+                  onValueChange={(value) => setTheme(value)}
+                >
+                  <MenubarRadioItem value='light'>
+                    <Sun className='h-4 w-4' />
+                    Light
+                  </MenubarRadioItem>
+                  <MenubarRadioItem value='dark'>
+                    <Moon className='h-4 w-4' />
+                    Dark
+                  </MenubarRadioItem>
+                  <MenubarRadioItem value='system'>
+                    <SunMoon className='h-4 w-4' />
+                    System
+                  </MenubarRadioItem>
+                </MenubarRadioGroup>
+              </MenubarSubContent>
+            </MenubarSub>
+          </MenubarContent>
+        </MenubarMenu>
+
+        <MenubarMenu>
+          <MenubarTrigger>Help</MenubarTrigger>
+          <MenubarContent>
+            <MenubarItem>About</MenubarItem>
           </MenubarContent>
         </MenubarMenu>
       </Menubar>
-      <Select
-        onValueChange={(value) => setTheme(value)}
-        value={theme}
-        className='w-fit'
-      >
-        <SelectTrigger
-          id='themeSelect'
-          className='w-fit'
-        >
-          <SelectValue placeholder='Chọn chủ đề' />
-        </SelectTrigger>
-        <SelectContent position='popper'>
-          <SelectItem value='light'>
-            <span className='flex flex-row items-center gap-1'>
-              <Sun
-                width={16}
-                height={16}
-              />
-              Sáng
-            </span>
-          </SelectItem>
-          <SelectItem value='dark'>
-            <span className='flex flex-row items-center gap-1'>
-              <Moon
-                width={16}
-                height={16}
-              />
-              Tối
-            </span>
-          </SelectItem>
-          <SelectItem value='system'>
-            <span className='flex flex-row items-center gap-1'>
-              <SunMoon
-                width={16}
-                height={16}
-              />
-              Tự động
-            </span>
-          </SelectItem>
-        </SelectContent>
-      </Select>
     </nav>
   )
 }
