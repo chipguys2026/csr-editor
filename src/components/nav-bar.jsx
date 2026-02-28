@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import useTheme from '@/hooks/use-theme'
@@ -18,6 +18,13 @@ import {
   MenubarSubTrigger,
   MenubarTrigger,
 } from '@/components/ui/menubar'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 import packageInfo from '../../package.json'
 import { paramsSchema } from '@/schemas/params-schema'
@@ -53,6 +60,7 @@ export const NavBar = () => {
     (state) => state.setCurrentRegister
   )
   const fileInputRef = useRef(null)
+  const [isAboutOpen, setIsAboutOpen] = useState(false)
   const viewRoutes = [
     { label: 'Editor', value: 'editor', path: '/' },
     { label: 'Document', value: 'document', path: '/document' },
@@ -139,81 +147,129 @@ export const NavBar = () => {
   }
 
   return (
-    <nav className='flex flex-row items-center gap-4 border-b p-2'>
-      <h1 className='font-bold'>CSR Editor</h1>
-      <input
-        ref={fileInputRef}
-        type='file'
-        accept='application/json,.json'
-        className='hidden'
-        onChange={onFileChange}
-      />
+    <>
+      <nav className='flex flex-row items-center gap-4 border-b p-2'>
+        <h1 className='font-bold'>CSR Editor</h1>
+        <input
+          ref={fileInputRef}
+          type='file'
+          accept='application/json,.json'
+          className='hidden'
+          onChange={onFileChange}
+        />
 
-      <Menubar className='border-0'>
-        <MenubarMenu>
-          <MenubarTrigger>File</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem onClick={onNewJson}>New</MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem onClick={onOpenJson}>Open JSON</MenubarItem>
-            <MenubarItem onClick={onSaveJson}>Save JSON</MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem>Export PDF</MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
+        <Menubar className='border-0'>
+          <MenubarMenu>
+            <MenubarTrigger>File</MenubarTrigger>
+            <MenubarContent>
+              <MenubarItem onClick={onNewJson}>New</MenubarItem>
+              <MenubarSeparator />
+              <MenubarItem onClick={onOpenJson}>Open JSON</MenubarItem>
+              <MenubarItem onClick={onSaveJson}>Save JSON</MenubarItem>
+              <MenubarSeparator />
+              <MenubarItem>Export PDF</MenubarItem>
+            </MenubarContent>
+          </MenubarMenu>
 
-        <MenubarMenu>
-          <MenubarTrigger>View</MenubarTrigger>
-          <MenubarContent>
-            <MenubarRadioGroup
-              value={currentView}
-              onValueChange={(value) => {
-                const next = viewRoutes.find((route) => route.value === value)
-                if (next) navigate(next.path)
-              }}
-            >
-              {viewRoutes.map((route) => (
-                <MenubarRadioItem
-                  key={route.value}
-                  value={route.value}
-                >
-                  {route.label}
-                </MenubarRadioItem>
-              ))}
-            </MenubarRadioGroup>
-            <MenubarSeparator />
-            <MenubarSub>
-              <MenubarSubTrigger>Theme</MenubarSubTrigger>
-              <MenubarSubContent>
-                <MenubarRadioGroup
-                  value={theme}
-                  onValueChange={(value) => setTheme(value)}
-                >
-                  <MenubarRadioItem value='light'>
-                    <Sun className='h-4 w-4' />
-                    Light
+          <MenubarMenu>
+            <MenubarTrigger>View</MenubarTrigger>
+            <MenubarContent>
+              <MenubarRadioGroup
+                value={currentView}
+                onValueChange={(value) => {
+                  const next = viewRoutes.find((route) => route.value === value)
+                  if (next) navigate(next.path)
+                }}
+              >
+                {viewRoutes.map((route) => (
+                  <MenubarRadioItem
+                    key={route.value}
+                    value={route.value}
+                  >
+                    {route.label}
                   </MenubarRadioItem>
-                  <MenubarRadioItem value='dark'>
-                    <Moon className='h-4 w-4' />
-                    Dark
-                  </MenubarRadioItem>
-                  <MenubarRadioItem value='system'>
-                    <SunMoon className='h-4 w-4' />
-                    System
-                  </MenubarRadioItem>
-                </MenubarRadioGroup>
-              </MenubarSubContent>
-            </MenubarSub>
-          </MenubarContent>
-        </MenubarMenu>
+                ))}
+              </MenubarRadioGroup>
+              <MenubarSeparator />
+              <MenubarSub>
+                <MenubarSubTrigger>Theme</MenubarSubTrigger>
+                <MenubarSubContent>
+                  <MenubarRadioGroup
+                    value={theme}
+                    onValueChange={(value) => setTheme(value)}
+                  >
+                    <MenubarRadioItem value='light'>
+                      <Sun className='h-4 w-4' />
+                      Light
+                    </MenubarRadioItem>
+                    <MenubarRadioItem value='dark'>
+                      <Moon className='h-4 w-4' />
+                      Dark
+                    </MenubarRadioItem>
+                    <MenubarRadioItem value='system'>
+                      <SunMoon className='h-4 w-4' />
+                      System
+                    </MenubarRadioItem>
+                  </MenubarRadioGroup>
+                </MenubarSubContent>
+              </MenubarSub>
+            </MenubarContent>
+          </MenubarMenu>
 
-        <MenubarMenu>
-          <MenubarTrigger>Help</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem>About</MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-      </Menubar>
-    </nav>
+          <MenubarMenu>
+            <MenubarTrigger>Help</MenubarTrigger>
+            <MenubarContent>
+              <MenubarItem onClick={() => setIsAboutOpen(true)}>About</MenubarItem>
+            </MenubarContent>
+          </MenubarMenu>
+        </Menubar>
+      </nav>
+
+      <Dialog
+        open={isAboutOpen}
+        onOpenChange={setIsAboutOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>About</DialogTitle>
+            <DialogDescription>CSR Editor</DialogDescription>
+          </DialogHeader>
+
+          <div className='space-y-3 text-sm'>
+            <p className='text-muted-foreground'>
+              Browser-based CSR editor with JSON import/export and integrated
+              RTL generation.
+            </p>
+            <div>
+              <p className='font-medium'>Version</p>
+              <p className='text-muted-foreground mt-1'>{packageInfo.version}</p>
+            </div>
+            <div>
+              <p className='font-medium'>Feature</p>
+              <div className='text-muted-foreground mt-1 space-y-2'>
+                <p>
+                  Create and manage CSR designs end to end in the browser.
+                </p>
+                <ul className='list-disc space-y-1 pl-5'>
+                  <li>Edit registers, fields, reset values, and bit ranges</li>
+                  <li>Configure module name, data width, address width, and interface</li>
+                  <li>Import and export project JSON files</li>
+                  <li>Generate native or Avalon-MM RTL</li>
+                  <li>Preview generated SystemVerilog in the RTL viewer</li>
+                  <li>Download the active RTL file or all generated outputs</li>
+                </ul>
+              </div>
+            </div>
+            <div>
+              <p className='font-medium'>Authors</p>
+              <ul className='text-muted-foreground mt-1 list-disc space-y-1 pl-5'>
+                <li>chipguys2026 (lead author)</li>
+                <li>superzeldalink (contributor)</li>
+              </ul>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
