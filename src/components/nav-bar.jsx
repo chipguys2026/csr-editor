@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import useTheme from '@/hooks/use-theme'
@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/menubar'
 
 import packageInfo from '../../package.json'
+import { paramsSchema } from '@/schemas/params-schema'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { useCurrentRegisterStore } from '@/store/current-register-store'
@@ -43,7 +44,8 @@ export const NavBar = () => {
   const { theme, setTheme } = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
-  const { dataWidth, addrWidth } = useParamStore()
+  const { dataWidth, addrWidth, interface: csrInterface, moduleName } =
+    useParamStore()
   const registers = useRegisterStore((state) => state.registers)
   const setParams = useParamStore((state) => state.setParams)
   const setRegisters = useRegisterStore((state) => state.setRegisters)
@@ -51,7 +53,6 @@ export const NavBar = () => {
     (state) => state.setCurrentRegister
   )
   const fileInputRef = useRef(null)
-  const [isPromptOpen, setIsPromptOpen] = useState(false)
   const viewRoutes = [
     { label: 'Editor', value: 'editor', path: '/' },
     { label: 'Document', value: 'document', path: '/document' },
@@ -61,6 +62,14 @@ export const NavBar = () => {
   const currentView =
     viewRoutes.find((route) => route.path === location.pathname)?.value ??
     'editor'
+
+  const onNewJson = () => {
+    setParams(paramsSchema.parse({}))
+    setRegisters({})
+    setCurrentRegister(null)
+    navigate('/')
+    toast.success('Created a new CSR document')
+  }
 
   const onSaveJson = () => {
     const payload = {
@@ -74,11 +83,13 @@ export const NavBar = () => {
       params: {
         dataWidth,
         addrWidth,
+        interface: csrInterface,
+        moduleName,
       },
       registers,
     }
 
-    downloadJson('csr-editor.json', payload)
+    downloadJson(`${moduleName}.json`, payload)
   }
 
   const onOpenJson = () => {
@@ -99,14 +110,14 @@ export const NavBar = () => {
         throw new Error('Invalid JSON shape')
       }
 
-      const nextDataWidth = Number(params.dataWidth)
-      const nextAddrWidth = Number(params.addrWidth)
+      const nextParams = paramsSchema.parse({
+        dataWidth: Number(params.dataWidth),
+        addrWidth: Number(params.addrWidth),
+        interface: params.interface ?? 'Native',
+        moduleName: params.moduleName ?? 'CSR',
+      })
 
-      if (Number.isNaN(nextDataWidth) || Number.isNaN(nextAddrWidth)) {
-        throw new Error('Invalid params values')
-      }
-
-      setParams({ dataWidth: nextDataWidth, addrWidth: nextAddrWidth })
+      setParams(nextParams)
       setRegisters(importedRegisters)
 
       const addrKeys = Object.keys(importedRegisters)
@@ -137,10 +148,13 @@ export const NavBar = () => {
         className='hidden'
         onChange={onFileChange}
       />
+
       <Menubar className='border-0'>
         <MenubarMenu>
           <MenubarTrigger>File</MenubarTrigger>
           <MenubarContent>
+            <MenubarItem onClick={onNewJson}>New</MenubarItem>
+            <MenubarSeparator />
             <MenubarItem onClick={onOpenJson}>Open JSON</MenubarItem>
             <MenubarItem onClick={onSaveJson}>Save JSON</MenubarItem>
             <MenubarSeparator />
