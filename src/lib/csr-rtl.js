@@ -80,13 +80,13 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
     })
 
     const name = String(register?.name ?? `REG_${addrText}`)
-    const base = name.toLowerCase().replace(/_\d+$/, '')
-    const prefix = sanitizeName(base.split('_')[0] ?? name)
+    const constName = sanitizeConst(name)
+    const prefix = sanitizeName(name)
 
     return {
       addr: Number(addrText),
       name,
-      constName: sanitizeConst(name),
+      constName,
       prefix,
       fields,
     }
@@ -288,7 +288,8 @@ const renderAvalonBridge = ({ addrWidth, dataWidth }) => {
   const byteMask = []
 
   for (let index = byteLanes - 1; index >= 0; index -= 1) {
-    byteMask.push(`        {8{avmm_byteenable_i[${index}]}}`)
+    const suffix = index === 0 ? '' : ','
+    byteMask.push(`        {8{avmm_byteenable_i[${index}]}}${suffix}`)
   }
 
   return [
