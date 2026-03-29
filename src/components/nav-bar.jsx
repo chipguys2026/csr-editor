@@ -64,6 +64,7 @@ export const NavBar = () => {
   const viewRoutes = [
     { label: 'Editor', value: 'editor', path: '/' },
     { label: 'Document', value: 'document', path: '/document' },
+    { label: 'Excel', value: 'excel', path: '/excel' },
     { label: 'RTL', value: 'rtl', path: '/rtl' },
     { label: 'SDC', value: 'sdc', path: '/sdc' },
   ]
@@ -146,6 +147,11 @@ export const NavBar = () => {
     }
   }
 
+  const onExportExcel = () => {
+    navigate('/excel')
+    toast.success('Opened Excel preview')
+  }
+
   return (
     <>
       <nav className='flex flex-row items-center gap-4 border-b p-2'>
@@ -167,7 +173,7 @@ export const NavBar = () => {
               <MenubarItem onClick={onOpenJson}>Open JSON</MenubarItem>
               <MenubarItem onClick={onSaveJson}>Save JSON</MenubarItem>
               <MenubarSeparator />
-              <MenubarItem>Export PDF</MenubarItem>
+              <MenubarItem onClick={onExportExcel}>Export Excel</MenubarItem>
             </MenubarContent>
           </MenubarMenu>
 
