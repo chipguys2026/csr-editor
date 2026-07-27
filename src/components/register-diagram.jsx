@@ -23,6 +23,8 @@ const FieldRectanges = ({
   offsetX,
   offsetY,
   colorMap,
+  highlightLsb,
+  onHighlight,
 }) => (
   <g>
     {fields.map((field, i) => {
@@ -30,6 +32,8 @@ const FieldRectanges = ({
 
       const x = (nbBitCell - 1 - msb) * bitCellWidth + offsetX
       const width = (msb - lsb + 1) * bitCellWidth
+      const isHighlighted = highlightLsb === lsb
+      const isDimmed = highlightLsb != null && !isHighlighted
 
       return (
         <rect
@@ -39,9 +43,15 @@ const FieldRectanges = ({
           width={width}
           height={registerHeight}
           className={cn(
-            field.name === 'RESERVED' ? colorMap['RSVD'] : colorMap[field.type]
+            'transition-opacity',
+            field.name === 'RESERVED' ? colorMap['RSVD'] : colorMap[field.type],
+            isDimmed && 'opacity-30',
+            isHighlighted && 'stroke-foreground'
           )}
-          stroke='none'
+          stroke={isHighlighted ? undefined : 'none'}
+          strokeWidth={isHighlighted ? 2 : undefined}
+          onMouseEnter={() => onHighlight?.(lsb)}
+          onMouseLeave={() => onHighlight?.(null)}
         />
       )
     })}
@@ -88,10 +98,14 @@ const FieldAnnotations = ({
   fieldNameSize,
   offsetX,
   offsetY,
+  highlightLsb,
+  onHighlight,
 }) => (
   <g>
     {fields.map((field, i) => {
       const { msb, lsb } = field.bitRange
+      const isHighlighted = highlightLsb === lsb
+      const isDimmed = highlightLsb != null && !isHighlighted
 
       const fieldCenterX = calcFieldCenterX(
         msb,
@@ -104,10 +118,16 @@ const FieldAnnotations = ({
       const labelY = firstLineHeight + i * gap + offsetY
 
       return (
-        <g key={`fieldAnnotation${i}`}>
+        <g
+          key={`fieldAnnotation${i}`}
+          className={cn('transition-opacity', isDimmed && 'opacity-30')}
+          onMouseEnter={() => onHighlight?.(lsb)}
+          onMouseLeave={() => onHighlight?.(null)}
+        >
           <path
             d={`M ${fieldCenterX} ${fieldBottomY} L ${fieldCenterX} ${labelY} L ${fieldNameX - 2} ${labelY}`}
             className='stroke-foreground'
+            strokeWidth={isHighlighted ? 2 : undefined}
             fill='none'
           />
 
@@ -117,6 +137,7 @@ const FieldAnnotations = ({
             className='fill-foreground'
             fontSize={fieldNameSize}
             fontFamily='monospace'
+            fontWeight={isHighlighted ? 'bold' : undefined}
             textAnchor='start'
             dominantBaseline='middle'
           >
@@ -233,7 +254,13 @@ const RegisterFrame = ({
   )
 }
 
-export const RegisterDiagram = ({ fields, dataWidth, options }) => {
+export const RegisterDiagram = ({
+  fields,
+  dataWidth,
+  options,
+  highlightLsb = null,
+  onHighlight,
+}) => {
   const colorMap = {
     ...accessColorMap,
     ...(options?.colorMap ?? {}),
@@ -263,6 +290,12 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
     fields.length * indicatorGap
 
   const fullFields = normalizeRegister(fields)
+  // Label rows follow bit position, not the order fields were authored in: a
+  // leader line can only cross one from a row above it when the two are out of
+  // order, so sorting removes every crossing.
+  const annotationFields = [...fields].sort(
+    (a, b) => a.bitRange.lsb - b.bitRange.lsb
+  )
 
   return (
     <svg
@@ -288,6 +321,8 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
         offsetX={padding}
         offsetY={padding + indexLineHeight}
         colorMap={colorMap}
+        highlightLsb={highlightLsb}
+        onHighlight={onHighlight}
       />
       <FieldDividers
         fields={fullFields}
@@ -298,7 +333,7 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
         offsetY={padding + indexLineHeight}
       />
       <FieldAnnotations
-        fields={fields}
+        fields={annotationFields}
         nbBitCell={dataWidth}
         bitCellWidth={bitCellWidth}
         firstLineHeight={firstIndicatorLineHeight}
@@ -307,6 +342,8 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
         fieldNameSize={fieldNameSize}
         offsetX={padding}
         offsetY={padding + indexLineHeight + registerHeight + 2}
+        highlightLsb={highlightLsb}
+        onHighlight={onHighlight}
       />
       <RegisterFrame
         registerWidth={registerWidth}

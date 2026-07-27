@@ -35,7 +35,14 @@ import { CSS } from '@dnd-kit/utilities'
 
 import { cn } from '@/lib/utils'
 
-export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
+export const RegisterItem = ({
+  addr,
+  isDragging,
+  addrWidth,
+  claims,
+  hoveredReg,
+  onHoverReg,
+}) => {
   const reg = useRegisterStore((s) => s.registers[addr])
   const createRegister = useRegisterStore((s) => s.createRegister)
 
@@ -60,6 +67,9 @@ export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
   const instance = reg ? null : foreign[0]
 
   const isEmpty = !reg && !instance
+  // Every slot the hovered register reaches, so a bank lights up as a whole.
+  const inHoveredBank =
+    hoveredReg != null && (claims ?? []).some((entry) => entry.regAddr === hoveredReg)
 
   // Clicking a free slot leaves it reserved; creating one is the explicit +.
   const onSelect = () => {
@@ -82,6 +92,8 @@ export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
         isDragging && 'opacity-0'
       )}
       onClick={onSelect}
+      onMouseEnter={() => onHoverReg?.(instance ? instance.regAddr : reg ? addr : null)}
+      onMouseLeave={() => onHoverReg?.(null)}
     >
       {/* Drag handle */}
       <span
@@ -99,6 +111,7 @@ export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
         className={cn(
           'flex h-full grow items-center gap-2 border p-2',
           isEmpty ? 'text-muted-foreground' : 'cursor-pointer',
+          inHoveredBank && 'border-foreground/40 bg-muted-foreground/25',
           conflict && 'border-destructive text-destructive',
           instance && 'text-muted-foreground border-dashed'
         )}
@@ -167,6 +180,7 @@ export const RegisterDragOverlay = ({ addr, addrWidth, reg }) => {
 export const RegisterMap = () => {
   const parentRef = useRef(null)
   const [activeId, setActiveId] = useState(null)
+  const [hoveredReg, setHoveredReg] = useState(null)
 
   const { addrWidth, dataWidth, parameters } = useParamStore()
   const moveInsert = useRegisterStore((s) => s.moveInsert)
@@ -234,6 +248,8 @@ export const RegisterMap = () => {
                     step={step}
                     maxAddr={maxAddr}
                     claims={addressMap.get(addr)}
+                    hoveredReg={hoveredReg}
+                    onHoverReg={setHoveredReg}
                     isDragging={addr === activeId}
                   />
                 </div>

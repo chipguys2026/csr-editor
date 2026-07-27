@@ -492,6 +492,9 @@ export const RegisterDetail = () => {
   const updateRegister = useRegisterStore((s) => s.updateRegister)
 
   const [isEditing, setIsEditing] = useState(false)
+  // Bit position of the field under the cursor, shared by the table and the
+  // diagram so hovering either one lights up the other.
+  const [highlightLsb, setHighlightLsb] = useState(null)
 
   const {
     register: rf,
@@ -797,6 +800,8 @@ export const RegisterDetail = () => {
         <RegisterDiagram
           fields={fields}
           dataWidth={dataWidth}
+          highlightLsb={highlightLsb}
+          onHighlight={setHighlightLsb}
         />
       </div>
 
@@ -832,8 +837,14 @@ export const RegisterDetail = () => {
                   className={cn(
                     field.name == 'RESERVED' &&
                       'bg-muted text-muted-foreground',
+                    // Not bg-accent: it resolves to the same value as bg-muted,
+                    // so a highlighted RESERVED row would not change at all.
+                    highlightLsb === field.bitRange.lsb &&
+                      'bg-muted-foreground/25',
                     'align-top'
                   )}
+                  onMouseEnter={() => setHighlightLsb(field.bitRange.lsb)}
+                  onMouseLeave={() => setHighlightLsb(null)}
                 >
                   {field.name == 'RESERVED' ? (
                     <>
