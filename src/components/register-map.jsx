@@ -1,14 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 
+import { Button } from '@/components/ui/button'
 import { deleteRegister } from '@/lib/delete-register'
-
-// Row actions stay hidden until the row is hovered or the button is focused.
-const rowActionClass =
-  'hover:bg-accent ml-auto shrink-0 cursor-pointer rounded-sm p-0.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none'
 import { hex } from '@/lib/number-formating'
 import { formatArrayRange } from '@/lib/register'
-import { buildAddressMap, hasConflict } from '@/lib/address-map'
+import { buildAddressMap, buildRows, hasConflict } from '@/lib/address-map'
 import { useVirtualizer } from '@tanstack/react-virtual'
 
 import { useParamStore } from '@/store/params-store'
@@ -35,6 +33,10 @@ import { CSS } from '@dnd-kit/utilities'
 
 import { cn } from '@/lib/utils'
 
+// Row actions stay hidden until the row is hovered or the button is focused.
+const rowActionClass =
+  'hover:bg-accent ml-auto shrink-0 cursor-pointer rounded-sm p-0.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none'
+
 export const RegisterItem = ({
   addr,
   isDragging,
@@ -44,7 +46,6 @@ export const RegisterItem = ({
   onHoverReg,
 }) => {
   const reg = useRegisterStore((s) => s.registers[addr])
-  const createRegister = useRegisterStore((s) => s.createRegister)
 
   const setCurrentRegister = useCurrentRegisterStore(
     (s) => s.setCurrentRegister
@@ -66,29 +67,18 @@ export const RegisterItem = ({
   const conflict = hasConflict(claims)
   const instance = reg ? null : foreign[0]
 
-  const isEmpty = !reg && !instance
   // Every slot the hovered register reaches, so a bank lights up as a whole.
   const inHoveredBank =
     hoveredReg != null && (claims ?? []).some((entry) => entry.regAddr === hoveredReg)
 
-  // Clicking a free slot leaves it reserved; creating one is the explicit +.
-  const onSelect = () => {
-    if (isEmpty) return
-    setCurrentRegister(instance ? instance.regAddr : addr)
-  }
-
-  const onCreate = (event) => {
-    event.stopPropagation()
-    createRegister(addr)
-    setCurrentRegister(addr)
-  }
+  const onSelect = () => setCurrentRegister(instance ? instance.regAddr : addr)
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group grid h-9 grid-cols-[48px_1fr] items-center gap-2',
+        'group grid h-9 grid-cols-[auto_1fr] items-center gap-2',
         isDragging && 'opacity-0'
       )}
       onClick={onSelect}
@@ -100,7 +90,7 @@ export const RegisterItem = ({
         {...attributes}
         {...listeners}
         className={cn(
-          'text-muted-foreground cursor-grab text-sm',
+          'text-muted-foreground cursor-grab font-mono text-sm whitespace-nowrap',
           !reg && 'cursor-default opacity-50'
         )}
       >
@@ -109,8 +99,7 @@ export const RegisterItem = ({
 
       <div
         className={cn(
-          'flex h-full grow items-center gap-2 border p-2',
-          isEmpty ? 'text-muted-foreground' : 'cursor-pointer',
+          'flex h-full grow cursor-pointer items-center gap-2 border p-2',
           inHoveredBank && 'border-foreground/40 bg-muted-foreground/25',
           conflict && 'border-destructive text-destructive',
           instance && 'text-muted-foreground border-dashed'
@@ -122,8 +111,7 @@ export const RegisterItem = ({
         }
       >
         <span className='truncate'>
-          {reg?.name ??
-            (instance ? `${instance.name}[${instance.index}]` : 'Reserved')}
+          {reg?.name ?? `${instance.name}[${instance.index}]`}
         </span>
 
         {reg?.array && (
@@ -133,17 +121,6 @@ export const RegisterItem = ({
           >
             ×{reg.array.count}
           </span>
-        )}
-
-        {isEmpty && (
-          <button
-            type='button'
-            title={`Create a register at ${hex(addr, addrWidth)}`}
-            onClick={onCreate}
-            className={rowActionClass}
-          >
-            <Plus className='h-3.5 w-3.5' />
-          </button>
         )}
 
         {reg && (
@@ -164,10 +141,49 @@ export const RegisterItem = ({
   )
 }
 
+/** A run of unused addresses, collapsed to one row and open as a drop target. */
+const GapRow = ({ start, end, step, addrWidth, onCreate }) => {
+  const words = (end - start) / step + 1
+
+  const { setNodeRef } = useSortable({
+    id: start,
+    // Cannot be picked up, but a register can be dropped into it.
+    disabled: { draggable: true, droppable: false },
+  })
+
+  return (
+    <div
+      ref={setNodeRef}
+      className='group grid h-9 grid-cols-[auto_1fr] items-center gap-2'
+    >
+      <span className='text-muted-foreground font-mono text-sm whitespace-nowrap opacity-50'>
+        {hex(start, addrWidth)}
+      </span>
+
+      <div className='text-muted-foreground flex h-full grow items-center gap-2 border border-dashed p-2'>
+        <span className='truncate'>
+          {words === 1
+            ? 'Reserved'
+            : `Reserved · ${words.toLocaleString()} words to ${hex(end, addrWidth)}`}
+        </span>
+
+        <button
+          type='button'
+          title={`Create a register at ${hex(start, addrWidth)}`}
+          onClick={onCreate}
+          className={rowActionClass}
+        >
+          <Plus className='h-3.5 w-3.5' />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export const RegisterDragOverlay = ({ addr, addrWidth, reg }) => {
   return (
-    <div className='grid h-9 grid-cols-[48px_1fr] items-center gap-2'>
-      <span className='text-muted-foreground cursor-grabbing text-sm'>
+    <div className='grid h-9 grid-cols-[auto_1fr] items-center gap-2'>
+      <span className='text-muted-foreground cursor-grabbing font-mono text-sm whitespace-nowrap'>
         {hex(addr, addrWidth)}
       </span>
       <div className='flex h-full grow items-center border p-2'>
@@ -181,6 +197,7 @@ export const RegisterMap = () => {
   const parentRef = useRef(null)
   const [activeId, setActiveId] = useState(null)
   const [hoveredReg, setHoveredReg] = useState(null)
+  const [newAddr, setNewAddr] = useState('')
 
   const { addrWidth, dataWidth, parameters } = useParamStore()
   const moveInsert = useRegisterStore((s) => s.moveInsert)
@@ -189,18 +206,57 @@ export const RegisterMap = () => {
     activeId != null ? s.registers[activeId] : null
   )
 
+  const createRegister = useRegisterStore((s) => s.createRegister)
+  const setCurrentRegister = useCurrentRegisterStore((s) => s.setCurrentRegister)
+
   const addressMap = buildAddressMap(registers, parameters)
 
   const step = dataWidth / 8
-  const slotCount = 2 ** addrWidth / step
-  const maxAddr = (slotCount - 1) * step
+  // 2 ** addrWidth overflows past 53 bits, so cap the space at what a JS number
+  // still indexes exactly. Addresses that high are unreachable in practice.
+  const maxAddr = Math.min(2 ** addrWidth, Number.MAX_SAFE_INTEGER + 1) - step
 
-  const slots = Array.from({ length: slotCount }, (_, i) => i * step)
+  const rows = buildRows(addressMap, step, maxAddr)
+
+  const createAt = (addr) => {
+    createRegister(addr)
+    setCurrentRegister(addr)
+  }
+
+  // Gaps collapse to a single row, so typing an address is the only way to
+  // land somewhere specific inside a large one.
+  const createAtTyped = () => {
+    const raw = newAddr.trim().toLowerCase()
+    const addr = /^0x[0-9a-f]+$/.test(raw)
+      ? parseInt(raw.slice(2), 16)
+      : /^\d+$/.test(raw)
+        ? Number(raw)
+        : NaN
+
+    if (Number.isNaN(addr) || addr < 0 || addr > maxAddr) {
+      toast.error(`Address must be between 0 and ${hex(maxAddr, addrWidth)}`)
+      return
+    }
+
+    if (addr % step !== 0) {
+      toast.error(`Address must be ${step}-byte aligned`)
+      return
+    }
+
+    const owner = addressMap.get(addr)?.[0]
+    if (owner) {
+      toast.error(`${hex(addr, addrWidth)} is already taken by ${owner.name}`)
+      return
+    }
+
+    createAt(addr)
+    setNewAddr('')
+  }
 
   const sensors = useSensors(useSensor(PointerSensor))
 
   const rowVirtualizer = useVirtualizer({
-    count: slots.length,
+    count: rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 36,
   })
@@ -218,6 +274,31 @@ export const RegisterMap = () => {
         setActiveId(null)
       }}
     >
+      <div className='mb-2 flex items-center gap-2'>
+        <input
+          value={newAddr}
+          placeholder='0x0000'
+          onChange={(event) => setNewAddr(event.target.value)}
+          onKeyDown={(event) => event.key === 'Enter' && createAtTyped()}
+          className='border-input h-7 w-24 rounded-md border bg-transparent px-2 font-mono text-xs outline-none'
+        />
+
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          className='h-7'
+          onClick={createAtTyped}
+        >
+          <Plus className='h-3 w-3' />
+          Add register
+        </Button>
+
+        <span className='text-muted-foreground ml-auto text-xs'>
+          {Object.keys(registers).length} registers
+        </span>
+      </div>
+
       <div
         ref={parentRef}
         className='h-120 overflow-auto'
@@ -227,31 +308,41 @@ export const RegisterMap = () => {
           style={{ height: rowVirtualizer.getTotalSize() }}
         >
           <SortableContext
-            items={slots}
+            items={rows.map((row) => row.id)}
             strategy={verticalListSortingStrategy}
           >
-            {rowVirtualizer.getVirtualItems().map((row) => {
-              const addr = slots[row.index]
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const row = rows[virtualRow.index]
 
               return (
                 <div
-                  key={addr}
+                  key={row.id}
                   className='absolute left-0 w-full'
                   style={{
-                    height: row.size,
-                    transform: `translateY(${row.start}px)`,
+                    height: virtualRow.size,
+                    transform: `translateY(${virtualRow.start}px)`,
                   }}
                 >
-                  <RegisterItem
-                    addr={addr}
-                    addrWidth={addrWidth}
-                    step={step}
-                    maxAddr={maxAddr}
-                    claims={addressMap.get(addr)}
-                    hoveredReg={hoveredReg}
-                    onHoverReg={setHoveredReg}
-                    isDragging={addr === activeId}
-                  />
+                  {row.type === 'gap' ? (
+                    <GapRow
+                      start={row.start}
+                      end={row.end}
+                      step={step}
+                      addrWidth={addrWidth}
+                      onCreate={() => createAt(row.start)}
+                    />
+                  ) : (
+                    <RegisterItem
+                      addr={row.addr}
+                      addrWidth={addrWidth}
+                      step={step}
+                      maxAddr={maxAddr}
+                      claims={addressMap.get(row.addr)}
+                      hoveredReg={hoveredReg}
+                      onHoverReg={setHoveredReg}
+                      isDragging={row.addr === activeId}
+                    />
+                  )}
                 </div>
               )
             })}

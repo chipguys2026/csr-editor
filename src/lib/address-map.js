@@ -57,5 +57,32 @@ export const buildAddressMap = (registers = {}, parameters = []) => {
   return claims
 }
 
+/**
+ * Rows for the register map: one per claimed address, plus one collapsed row
+ * per run of free ones. Listing every word does not scale — a 32-bit space is
+ * a billion rows, too much to allocate and taller than a browser will let an
+ * element be — so the row count follows the number of registers instead.
+ */
+export const buildRows = (addressMap, step, maxAddr) => {
+  const claimed = [...addressMap.keys()].sort((a, b) => a - b)
+  const rows = []
+  let cursor = 0
+
+  for (const addr of claimed) {
+    if (addr > cursor) {
+      rows.push({ id: cursor, type: 'gap', start: cursor, end: addr - step })
+    }
+
+    rows.push({ id: addr, type: 'register', addr })
+    cursor = addr + step
+  }
+
+  if (cursor <= maxAddr) {
+    rows.push({ id: cursor, type: 'gap', start: cursor, end: maxAddr })
+  }
+
+  return rows
+}
+
 export const hasConflict = (entries = []) =>
   new Set(entries.map((entry) => entry.regAddr)).size > 1
