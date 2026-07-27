@@ -2,11 +2,21 @@ import { create } from 'zustand'
 
 /* ---------------- helpers ---------------- */
 
-const randomName = () =>
-  `REG_${Math.random().toString(16).slice(2, 8).toUpperCase()}`
+/** Name a new register after its address: 0x24 -> REG_0024. */
+const addressName = (addr, registers) => {
+  const base = `REG_${addr.toString(16).toUpperCase().padStart(4, '0')}`
+  const taken = new Set(Object.values(registers).map((reg) => reg.name))
 
-const createEmptyRegister = () => ({
-  name: randomName(),
+  let name = base
+  for (let suffix = 2; taken.has(name); suffix += 1) {
+    name = `${base}_${suffix}`
+  }
+
+  return name
+}
+
+const createEmptyRegister = (addr, registers) => ({
+  name: addressName(addr, registers),
   description: '',
   fields: [],
 })
@@ -30,10 +40,29 @@ export const useRegisterStore = create((set, get) => ({
       return {
         registers: {
           ...state.registers,
-          [addr]: createEmptyRegister(),
+          [addr]: createEmptyRegister(addr, state.registers),
         },
       }
     }),
+
+  removeRegister: (addr) =>
+    set((state) => {
+      if (!state.registers[addr]) return state
+
+      const registers = { ...state.registers }
+      delete registers[addr]
+
+      return { registers }
+    }),
+
+  /** Place a register at an address, creating or replacing it (used by undo). */
+  setRegister: (addr, register) =>
+    set((state) => ({
+      registers: {
+        ...state.registers,
+        [addr]: register,
+      },
+    })),
 
   updateRegister: (addr, newRegister) =>
     set((state) => {

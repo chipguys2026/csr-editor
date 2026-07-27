@@ -65,8 +65,9 @@ const HomePage = () => {
                 </EmptyMedia>
                 <EmptyTitle>No Register Selected</EmptyTitle>
                 <EmptyDescription>
-                  Select a Register from Register Map to view and edit in
-                  detail.
+                  Select a register from the Register Map to view and edit it in
+                  detail, or hover a reserved address and press + to create one
+                  there.
                 </EmptyDescription>
               </EmptyHeader>
               <EmptyContent />

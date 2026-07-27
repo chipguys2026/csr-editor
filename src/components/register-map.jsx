@@ -1,4 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { Plus, Trash2 } from 'lucide-react'
+
+import { deleteRegister } from '@/lib/delete-register'
+
+// Row actions stay hidden until the row is hovered or the button is focused.
+const rowActionClass =
+  'hover:bg-accent ml-auto shrink-0 cursor-pointer rounded-sm p-0.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none'
 import { hex } from '@/lib/number-formating'
 import { formatArrayRange } from '@/lib/register'
 import { buildAddressMap, hasConflict } from '@/lib/address-map'
@@ -52,15 +59,17 @@ export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
   const conflict = hasConflict(claims)
   const instance = reg ? null : foreign[0]
 
-  const onSelect = () => {
-    if (instance) {
-      setCurrentRegister(instance.regAddr)
-      return
-    }
+  const isEmpty = !reg && !instance
 
-    if (!reg) {
-      createRegister(addr)
-    }
+  // Clicking a free slot leaves it reserved; creating one is the explicit +.
+  const onSelect = () => {
+    if (isEmpty) return
+    setCurrentRegister(instance ? instance.regAddr : addr)
+  }
+
+  const onCreate = (event) => {
+    event.stopPropagation()
+    createRegister(addr)
     setCurrentRegister(addr)
   }
 
@@ -69,7 +78,7 @@ export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
       ref={setNodeRef}
       style={style}
       className={cn(
-        'grid h-9 grid-cols-[48px_1fr] items-center gap-2',
+        'group grid h-9 grid-cols-[48px_1fr] items-center gap-2',
         isDragging && 'opacity-0'
       )}
       onClick={onSelect}
@@ -80,7 +89,7 @@ export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
         {...listeners}
         className={cn(
           'text-muted-foreground cursor-grab text-sm',
-          !reg && 'cursor-pointer opacity-50'
+          !reg && 'cursor-default opacity-50'
         )}
       >
         {hex(addr, addrWidth)}
@@ -88,7 +97,8 @@ export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
 
       <div
         className={cn(
-          'flex h-full grow cursor-pointer items-center gap-2 border p-2',
+          'flex h-full grow items-center gap-2 border p-2',
+          isEmpty ? 'text-muted-foreground' : 'cursor-pointer',
           conflict && 'border-destructive text-destructive',
           instance && 'text-muted-foreground border-dashed'
         )}
@@ -110,6 +120,31 @@ export const RegisterItem = ({ addr, isDragging, addrWidth, claims }) => {
           >
             ×{reg.array.count}
           </span>
+        )}
+
+        {isEmpty && (
+          <button
+            type='button'
+            title={`Create a register at ${hex(addr, addrWidth)}`}
+            onClick={onCreate}
+            className={rowActionClass}
+          >
+            <Plus className='h-3.5 w-3.5' />
+          </button>
+        )}
+
+        {reg && (
+          <button
+            type='button'
+            title={`Delete ${reg.name}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              deleteRegister(addr)
+            }}
+            className={cn(rowActionClass, 'text-destructive')}
+          >
+            <Trash2 className='h-3.5 w-3.5' />
+          </button>
         )}
       </div>
     </div>

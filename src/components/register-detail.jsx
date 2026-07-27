@@ -12,6 +12,7 @@ import {
 } from '@/lib/register'
 import { accessTypes } from '@/lib/access-types'
 import { buildAddressMap } from '@/lib/address-map'
+import { deleteRegister } from '@/lib/delete-register'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -689,14 +690,27 @@ export const RegisterDetail = () => {
           />
 
           {!isEditing ? (
-            <Button
-              variant='outline'
-              size='icon'
-              onClick={() => setIsEditing(true)}
-              className='h-8 w-8'
-            >
-              <Pencil className='h-4 w-4' />
-            </Button>
+            <div className='flex items-center gap-2'>
+              <Button
+                variant='outline'
+                size='icon'
+                onClick={() => setIsEditing(true)}
+                className='h-8 w-8'
+                title='Edit register'
+              >
+                <Pencil className='h-4 w-4' />
+              </Button>
+
+              <Button
+                variant='outline'
+                size='icon'
+                onClick={() => deleteRegister(addr)}
+                className='h-8 w-8'
+                title={`Delete ${registerData.name}`}
+              >
+                <Trash2 className='text-destructive h-4 w-4' />
+              </Button>
+            </div>
           ) : (
             <div className='flex items-center gap-2'>
               <Button
