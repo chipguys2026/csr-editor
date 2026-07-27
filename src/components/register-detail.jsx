@@ -5,8 +5,13 @@ import {
   normalizeRegister,
   getFieldWidth,
   calcTotalBitsUsed,
+  formatArrayAddress,
+  formatArrayRange,
   formatBitRange,
+  isLiteralCount,
 } from '@/lib/register'
+import { accessTypes } from '@/lib/access-types'
+import { buildAddressMap } from '@/lib/address-map'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -34,6 +39,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from './ui/button'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -191,16 +197,56 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
       </SelectTrigger>
 
       <SelectContent>
-        {['RW', 'RO', 'WO', 'W1C', 'W0C'].map((t) => (
+        {accessTypes.map((type) => (
           <SelectItem
-            key={t}
-            value={t}
+            key={type.value}
+            value={type.value}
+            title={type.description}
           >
-            {t}
+            {type.value}
           </SelectItem>
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+/**
+ * Optional vector width for an RO field: the port becomes `[EXPR-1:0]` and the
+ * generator copies as many bits as both the port and the field have.
+ */
+const FieldPortWidth = ({ field, isEditing, setValue }) => {
+  const isRo = field.type === 'RO'
+
+  if (!isEditing) {
+    return field.portWidth ? (
+      <Badge
+        variant='secondary'
+        className='font-mono'
+      >
+        [{field.portWidth}]
+      </Badge>
+    ) : null
+  }
+
+  return (
+    <input
+      type='text'
+      disabled={!isRo}
+      placeholder={isRo ? '—' : ''}
+      title={isRo ? 'Parameter or literal port width' : 'RO fields only'}
+      value={field.portWidth ?? ''}
+      onChange={(event) => {
+        const raw = event.target.value.trim()
+        setValue(`fields.${field.trueIndex}.portWidth`, raw === '' ? undefined : raw, {
+          shouldDirty: true,
+        })
+      }}
+      className={cn(
+        'w-24 border-none bg-transparent p-0 text-center font-mono',
+        'focus:ring-0 focus:outline-none disabled:opacity-40'
+      )}
+    />
   )
 }
 
@@ -306,6 +352,114 @@ const FieldDesc = ({ field, isEditing, rf }) => {
   )
 }
 
+/**
+ * Turns a register into a repeated bank: `count` is a declared parameter name
+ * or a literal, `stride` is the byte distance between instances, and instances
+ * start at `firstIndex` (1 when index 0 lives in legacy registers).
+ */
+const RegisterArrayEditor = ({ addr, array, parameters, addrWidth, step, onChange }) => {
+  const countIsValid =
+    isLiteralCount(array?.count) ||
+    parameters.some((parameter) => parameter.name === array?.count)
+
+  return (
+    <div className='flex flex-col gap-2 rounded-md border p-3'>
+      <div className='flex items-center gap-2'>
+        <Switch
+          id='array-toggle'
+          checked={Boolean(array)}
+          onCheckedChange={(checked) =>
+            onChange(
+              checked
+                ? { count: parameters[0]?.name ?? '2', stride: step, firstIndex: 0 }
+                : undefined
+            )
+          }
+        />
+        <label
+          htmlFor='array-toggle'
+          className='text-sm'
+        >
+          Repeat as array
+        </label>
+      </div>
+
+      {array && (
+        <>
+          <div className='flex flex-wrap items-end gap-3'>
+            <label className='flex flex-col gap-1 text-xs'>
+              Count
+              <input
+                className='h-7 w-40 rounded-md border px-2 font-mono text-sm'
+                value={array.count ?? ''}
+                onChange={(event) => {
+                  const raw = event.target.value.trim()
+                  onChange({
+                    ...array,
+                    count: isLiteralCount(raw) ? Number(raw) : raw,
+                  })
+                }}
+              />
+            </label>
+
+            <label className='flex flex-col gap-1 text-xs'>
+              Stride (bytes)
+              <input
+                type='number'
+                className='h-7 w-24 rounded-md border px-2 font-mono text-sm'
+                value={array.stride ?? step}
+                onChange={(event) =>
+                  onChange({ ...array, stride: Number(event.target.value) })
+                }
+              />
+            </label>
+
+            <label className='flex flex-col gap-1 text-xs'>
+              First index
+              <input
+                type='number'
+                className='h-7 w-24 rounded-md border px-2 font-mono text-sm'
+                value={array.firstIndex ?? 0}
+                onChange={(event) =>
+                  onChange({ ...array, firstIndex: Number(event.target.value) })
+                }
+              />
+            </label>
+          </div>
+
+          {parameters.length > 0 && (
+            <div className='flex flex-wrap items-center gap-1 text-xs'>
+              <span className='text-muted-foreground'>Parameters:</span>
+              {parameters.map((parameter) => (
+                <button
+                  key={parameter.name}
+                  type='button'
+                  className='hover:bg-accent rounded-md border px-1.5 py-0.5 font-mono'
+                  title={`${parameter.name} = ${parameter.value}`}
+                  onClick={() => onChange({ ...array, count: parameter.name })}
+                >
+                  {parameter.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <p
+            className={cn(
+              'font-mono text-xs',
+              countIsValid ? 'text-muted-foreground' : 'text-destructive'
+            )}
+          >
+            {countIsValid
+              ? `${formatArrayAddress(addr, array, addrWidth)}, ${formatArrayRange(array)}`
+              : `'${array.count}' is not a declared parameter or a positive integer`}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 const FieldInsertLine = ({ show, onClick }) => {
   if (!show) return null
 
@@ -326,9 +480,11 @@ const FieldInsertLine = ({ show, onClick }) => {
 
 
 export const RegisterDetail = () => {
-  const { dataWidth } = useParamStore()
+  const { dataWidth, addrWidth, parameters } = useParamStore()
+  const step = dataWidth / 8
 
   const addr = useCurrentRegisterStore((s) => s.currentRegister)
+  const setCurrentRegister = useCurrentRegisterStore((s) => s.setCurrentRegister)
   const registerData = useRegisterStore((s) =>
     addr != null ? s.registers[addr] : null
   )
@@ -357,11 +513,15 @@ export const RegisterDetail = () => {
   if (!registerData) return null
 
   const fields = watch('fields')
+  const registerArray = watch('array')
 
   const fullFields = normalizeRegister(fields)
 
   const totalBitsUsed = calcTotalBitsUsed(fields)
   const canInsert = isEditing && totalBitsUsed < dataWidth
+  // Vector ports are niche: only take the column when it is in use.
+  const showPortColumn =
+    isEditing || fields.some((field) => field.portWidth)
 
   const onSave = handleSubmit((formData) => {
     updateRegister(addr, formData)
@@ -371,6 +531,42 @@ export const RegisterDetail = () => {
   const onCancel = () => {
     reset(registerData)
     setIsEditing(false)
+  }
+
+  /**
+   * A bank is several registers sharing one stride, interleaved from the same
+   * base (addr_low @ +0, addr_high @ +4, ctl @ +8). This drops the next one in
+   * at the first free word inside the stride.
+   */
+  const addBankSibling = () => {
+    const { registers, createRegister, patchRegister } =
+      useRegisterStore.getState()
+    const taken = buildAddressMap(registers, parameters ?? [])
+
+    let next = addr + step
+    while (next < addr + registerArray.stride && taken.has(next)) {
+      next += step
+    }
+
+    if (next >= addr + registerArray.stride) {
+      toast.error('No free word left inside this bank stride')
+      return
+    }
+
+    let name = `${registerData.name}_2`
+    for (let suffix = 2; Object.values(registers).some((r) => r.name === name); suffix += 1) {
+      name = `${registerData.name}_${suffix + 1}`
+    }
+
+    createRegister(next)
+    patchRegister(next, {
+      name,
+      description: registerData.description,
+      array: { ...registerArray },
+      fields: [],
+    })
+    setCurrentRegister(next)
+    toast.success(`Added ${name} to the bank at 0x${next.toString(16)}`)
   }
 
   const insertField = (index) => {
@@ -524,9 +720,47 @@ export const RegisterDetail = () => {
           )}
         </div>
 
-        <Badge className='font-mono'>
-          0x{addr.toString(16).padStart(4, '0')}
-        </Badge>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Badge className='font-mono'>
+            0x{addr.toString(16).padStart(4, '0')}
+          </Badge>
+
+          {registerArray && (
+            <Badge
+              variant='secondary'
+              className='font-mono'
+              title={formatArrayRange(registerArray)}
+            >
+              ×{registerArray.count} · {formatArrayAddress(addr, registerArray, addrWidth)}
+            </Badge>
+          )}
+
+          {registerArray && !isEditing && (
+            <Button
+              variant='outline'
+              size='sm'
+              className='h-6'
+              title='Create another register interleaved into this bank'
+              onClick={addBankSibling}
+            >
+              <Plus className='h-3 w-3' />
+              Add to bank
+            </Button>
+          )}
+        </div>
+
+        {isEditing && (
+          <RegisterArrayEditor
+            addr={addr}
+            array={registerArray}
+            parameters={parameters ?? []}
+            addrWidth={addrWidth}
+            step={step}
+            onChange={(next) =>
+              setValue('array', next, { shouldDirty: true })
+            }
+          />
+        )}
 
         {isEditing ? (
           <textarea
@@ -563,6 +797,9 @@ export const RegisterDetail = () => {
               <TableHead className='min-w-40'>Field</TableHead>
               <TableHead className='min-w-20 text-center'>Bits</TableHead>
               <TableHead className='min-w-20 text-center'>Type</TableHead>
+              {showPortColumn && (
+                <TableHead className='min-w-24 text-center'>Port</TableHead>
+              )}
               <TableHead className='min-w-20 text-right'>Reset</TableHead>
               <TableHead>Description</TableHead>
             </TableRow>
@@ -602,6 +839,8 @@ export const RegisterDetail = () => {
                       <TableCell className='text-center align-top'>
                         <Badge variant='outline'>{field.type}</Badge>
                       </TableCell>
+
+                      {showPortColumn && <TableCell />}
 
                       <TableCell className='text-right align-top font-mono'>
                         {hex(
@@ -671,6 +910,16 @@ export const RegisterDetail = () => {
                           watch={watch}
                         />
                       </TableCell>
+
+                      {showPortColumn && (
+                        <TableCell className='text-center align-top'>
+                          <FieldPortWidth
+                            field={field}
+                            isEditing={isEditing}
+                            setValue={setValue}
+                          />
+                        </TableCell>
+                      )}
 
                       <TableCell className='text-right align-top font-mono'>
                         <FieldResetValue

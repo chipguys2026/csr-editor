@@ -120,12 +120,14 @@ const RTLPage = () => {
   const addrWidth = useParamStore((state) => state.addrWidth)
   const csrInterface = useParamStore((state) => state.interface)
   const moduleName = useParamStore((state) => state.moduleName)
+  const parameters = useParamStore((state) => state.parameters)
   const registers = useRegisterStore((state) => state.registers)
   const params = {
     dataWidth,
     addrWidth,
     interface: csrInterface,
     moduleName,
+    parameters,
   }
 
   let files = []

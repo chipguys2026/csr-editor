@@ -1,7 +1,14 @@
 import { useEffect } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Controller, useForm } from 'react-hook-form'
-import { interfaceOptions, paramsSchema } from '@/schemas/params-schema'
+import { Plus, Trash2 } from 'lucide-react'
+import {
+  createParameter,
+  interfaceOptions,
+  paramsSchema,
+} from '@/schemas/params-schema'
+
+import { Button } from '@/components/ui/button'
 
 import {
   Field,
@@ -10,6 +17,7 @@ import {
   FieldGroup,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 import {
   Select,
   SelectContent,
@@ -20,12 +28,20 @@ import {
 
 import { useParamStore } from '@/store/params-store'
 
+const sameParams = (a, b) =>
+  a.dataWidth === b.dataWidth &&
+  a.addrWidth === b.addrWidth &&
+  a.interface === b.interface &&
+  a.moduleName === b.moduleName &&
+  JSON.stringify(a.parameters ?? []) === JSON.stringify(b.parameters ?? [])
+
 export const ParamPanel = () => {
   const {
     dataWidth,
     addrWidth,
     interface: csrInterface,
     moduleName,
+    parameters,
     setParams,
   } = useParamStore()
 
@@ -37,29 +53,25 @@ export const ParamPanel = () => {
       addrWidth: addrWidth || 16,
       interface: csrInterface || 'Native',
       moduleName: moduleName || 'CSR',
+      parameters: parameters ?? [],
     },
   })
 
   useEffect(() => {
-    const currentValues = form.getValues()
     const nextValues = {
       dataWidth,
       addrWidth,
       interface: csrInterface,
       moduleName,
+      parameters: parameters ?? [],
     }
 
-    if (
-      currentValues.dataWidth === nextValues.dataWidth &&
-      currentValues.addrWidth === nextValues.addrWidth &&
-      currentValues.interface === nextValues.interface &&
-      currentValues.moduleName === nextValues.moduleName
-    ) {
+    if (sameParams(form.getValues(), nextValues)) {
       return
     }
 
     form.reset(nextValues)
-  }, [form, dataWidth, addrWidth, csrInterface, moduleName])
+  }, [form, dataWidth, addrWidth, csrInterface, moduleName, parameters])
 
   const commitParamChange = (name, value) => {
     form.setValue(name, value, {
@@ -77,16 +89,29 @@ export const ParamPanel = () => {
     if (!parsed.success) return
 
     if (
-      parsed.data.dataWidth === dataWidth &&
-      parsed.data.addrWidth === addrWidth &&
-      parsed.data.interface === csrInterface &&
-      parsed.data.moduleName === moduleName
+      sameParams(parsed.data, {
+        dataWidth,
+        addrWidth,
+        interface: csrInterface,
+        moduleName,
+        parameters,
+      })
     ) {
       return
     }
 
     setParams(parsed.data)
   }
+
+  const declaredParameters = form.watch('parameters') ?? []
+
+  const patchParameter = (index, patch) =>
+    commitParamChange(
+      'parameters',
+      declaredParameters.map((parameter, i) =>
+        i === index ? { ...parameter, ...patch } : parameter
+      )
+    )
 
   return (
     <div>
@@ -194,7 +219,108 @@ export const ParamPanel = () => {
             </Field>
           )}
         />
+
+        {/* RTL parameters */}
+        <Field>
+          <div className='flex items-center justify-between'>
+            <FieldLabel>RTL Parameters</FieldLabel>
+
+            <Button
+              type='button'
+              variant='outline'
+              size='icon'
+              className='h-6 w-6'
+              title='Add parameter'
+              onClick={() =>
+                commitParamChange('parameters', [
+                  ...declaredParameters,
+                  createParameter(declaredParameters),
+                ])
+              }
+            >
+              <Plus className='h-3 w-3' />
+            </Button>
+          </div>
+
+          {declaredParameters.length === 0 ? (
+            <p className='text-muted-foreground text-xs'>
+              Declare a parameter to size register arrays, e.g. NUM_LANES.
+            </p>
+          ) : (
+            <div className='flex flex-col gap-2'>
+              {declaredParameters.map((parameter, index) => (
+                <ParameterRow
+                  key={index}
+                  parameter={parameter}
+                  errors={form.formState.errors.parameters?.[index]}
+                  onChange={(patch) => patchParameter(index, patch)}
+                  onRemove={() =>
+                    commitParamChange(
+                      'parameters',
+                      declaredParameters.filter((_, i) => i !== index)
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </Field>
       </FieldGroup>
+    </div>
+  )
+}
+
+const ParameterRow = ({ parameter, errors, onChange, onRemove }) => {
+  const messages = Object.values(errors ?? {})
+    .map((error) => error?.message)
+    .filter(Boolean)
+
+  return (
+    <div className='flex flex-col gap-1 rounded-md border p-2'>
+      <div className='flex items-center gap-1'>
+        <Input
+          className='h-7 px-2 font-mono text-xs'
+          placeholder='NAME'
+          value={parameter.name ?? ''}
+          onChange={(event) => onChange({ name: event.target.value })}
+        />
+
+        <Input
+          title='Value'
+          placeholder='value'
+          className='h-7 w-20 shrink-0 px-2 text-xs'
+          value={parameter.value ?? ''}
+          onChange={(event) => onChange({ value: Number(event.target.value) })}
+        />
+
+        <Button
+          type='button'
+          variant='outline'
+          size='icon'
+          className='h-7 w-7 shrink-0'
+          title='Remove parameter'
+          onClick={onRemove}
+        >
+          <Trash2 className='text-destructive h-3 w-3' />
+        </Button>
+      </div>
+
+      {/* text-wrap keeps the description filling its width even if an ancestor
+          turns on text-balance, which lays inputs out as even ragged lines. */}
+      <textarea
+        rows={3}
+        placeholder='description'
+        value={parameter.description ?? ''}
+        onChange={(event) => onChange({ description: event.target.value })}
+        className={cn(
+          'border-input w-full resize-y rounded-md border bg-transparent px-2 py-1 text-xs text-wrap',
+          'focus-visible:border-ring focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]'
+        )}
+      />
+
+      {messages.length > 0 && (
+        <FieldError errors={messages.map((message) => ({ message }))} />
+      )}
     </div>
   )
 }

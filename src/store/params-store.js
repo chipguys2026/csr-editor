@@ -5,6 +5,7 @@ export const useParamStore = create((set) => ({
   addrWidth: 16,
   interface: 'Native',
   moduleName: 'CSR',
+  parameters: [],
 
   setParams: (params) => set(params),
 }))

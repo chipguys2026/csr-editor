@@ -51,8 +51,13 @@ export const NavBar = () => {
   const { theme, setTheme } = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
-  const { dataWidth, addrWidth, interface: csrInterface, moduleName } =
-    useParamStore()
+  const {
+    dataWidth,
+    addrWidth,
+    interface: csrInterface,
+    moduleName,
+    parameters,
+  } = useParamStore()
   const registers = useRegisterStore((state) => state.registers)
   const setParams = useParamStore((state) => state.setParams)
   const setRegisters = useRegisterStore((state) => state.setRegisters)
@@ -94,6 +99,7 @@ export const NavBar = () => {
         addrWidth,
         interface: csrInterface,
         moduleName,
+        parameters,
       },
       registers,
     }
@@ -124,6 +130,7 @@ export const NavBar = () => {
         addrWidth: Number(params.addrWidth),
         interface: params.interface ?? 'Native',
         moduleName: params.moduleName ?? 'CSR',
+        parameters: params.parameters ?? [],
       })
 
       setParams(nextParams)
@@ -258,6 +265,9 @@ export const NavBar = () => {
                 </p>
                 <ul className='list-disc space-y-1 pl-5'>
                   <li>Edit registers, fields, reset values, and bit ranges</li>
+                  <li>
+                    Model RW, RO, WO, W1C, W0C, W1P, and W1SC field behaviour
+                  </li>
                   <li>Configure module name, data width, address width, and interface</li>
                   <li>Import and export project JSON files</li>
                   <li>Generate native or Avalon-MM RTL</li>

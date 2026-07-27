@@ -1,5 +1,18 @@
 import * as XLSX from 'xlsx-js-style'
 
+import { formatArrayAddress, formatArrayRange } from './register'
+
+/** Arrays document an address expression instead of a single address. */
+const registerAddress = (addr, reg) => {
+  const base = `0x${addr.toString(16).toUpperCase()}`
+
+  if (!reg?.array) {
+    return base
+  }
+
+  return `${formatArrayAddress(addr, reg.array)} (${formatArrayRange(reg.array)})`
+}
+
 /**
  * Generate Excel data for preview
  * @param {object} params - Document parameters (moduleName, dataWidth, addrWidth, interface)
@@ -25,7 +38,7 @@ export const generateExcelData = (params, registers) => {
     // Add register header row
     registerRows.push({
       isRegisterRow: true,
-      address: `0x${addr.toString(16).toUpperCase()}`,
+      address: registerAddress(addr, reg),
       registerName: reg.name,
       fieldName: '',
       bitRange: '',
@@ -162,7 +175,7 @@ export const exportToExcel = (filename, params, registers) => {
     const reg = registers[addr]
     // Add register header row with description
     registerData.push([
-      `0x${addr.toString(16).toUpperCase()}`,
+      registerAddress(addr, reg),
       reg.name,
       '',
       '',

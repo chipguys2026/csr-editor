@@ -39,14 +39,14 @@ const HomePage = () => {
         >
           <AccordionItem value='param-panel'>
             <AccordionTrigger className='p-4'>Parameters</AccordionTrigger>
-            <AccordionContent className='flex flex-col gap-4 p-4 text-balance'>
+            <AccordionContent className='flex flex-col gap-4 p-4'>
               <ParamPanel />
             </AccordionContent>
           </AccordionItem>
 
           <AccordionItem value='register-map'>
             <AccordionTrigger className='p-4'>Register Map</AccordionTrigger>
-            <AccordionContent className='flex flex-col gap-4 p-4 text-balance'>
+            <AccordionContent className='flex flex-col gap-4 p-4'>
               <RegisterMap />
             </AccordionContent>
           </AccordionItem>

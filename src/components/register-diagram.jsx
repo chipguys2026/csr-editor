@@ -1,3 +1,4 @@
+import { accessColorMap } from '@/lib/access-types'
 import { cn } from '@/lib/utils'
 import { normalizeRegister } from '@/lib/register'
 
@@ -234,12 +235,7 @@ const RegisterFrame = ({
 
 export const RegisterDiagram = ({ fields, dataWidth, options }) => {
   const colorMap = {
-    RW: 'fill-blue-200 dark:fill-blue-400',
-    WO: 'fill-green-200 dark:fill-green-400',
-    RO: 'fill-yellow-200 dark:fill-yellow-400',
-    W1C: 'fill-pink-200 dark:fill-pink-400',
-    W0C: 'fill-rose-200 dark:fill-rose-400',
-    RSVD: 'fill-neutral-200 dark:fill-neutral-400',
+    ...accessColorMap,
     ...(options?.colorMap ?? {}),
   }
   const registerWidth = options?.registerWidth ?? 768
