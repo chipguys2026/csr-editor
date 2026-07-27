@@ -43,7 +43,6 @@ const FieldRectanges = ({
           width={width}
           height={registerHeight}
           className={cn(
-            'transition-opacity',
             field.name === 'RESERVED' ? colorMap['RSVD'] : colorMap[field.type],
             isDimmed && 'opacity-30',
             isHighlighted && 'stroke-foreground'
@@ -120,7 +119,7 @@ const FieldAnnotations = ({
       return (
         <g
           key={`fieldAnnotation${i}`}
-          className={cn('transition-opacity', isDimmed && 'opacity-30')}
+          className={cn(isDimmed && 'opacity-30')}
           onMouseEnter={() => onHighlight?.(lsb)}
           onMouseLeave={() => onHighlight?.(null)}
         >

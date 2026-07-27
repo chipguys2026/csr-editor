@@ -835,6 +835,9 @@ export const RegisterDetail = () => {
 
                 <TableRow
                   className={cn(
+                    // TableRow ships with transition-colors; hover highlighting
+                    // should track the cursor, not fade in behind it.
+                    'transition-none',
                     field.name == 'RESERVED' &&
                       'bg-muted text-muted-foreground',
                     // Not bg-accent: it resolves to the same value as bg-muted,
