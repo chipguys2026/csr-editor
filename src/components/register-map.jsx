@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { deleteRegister } from '@/lib/delete-register'
 import { hex } from '@/lib/number-formating'
-import { formatArrayRange } from '@/lib/register'
+import { fieldIssues, formatArrayRange } from '@/lib/register'
 import { buildAddressMap, buildRows, hasConflict } from '@/lib/address-map'
 import { useVirtualizer } from '@tanstack/react-virtual'
 
@@ -42,6 +42,7 @@ export const RegisterItem = ({
   isDragging,
   addrWidth,
   claims,
+  issues,
   hoveredReg,
   onHoverReg,
 }) => {
@@ -101,13 +102,17 @@ export const RegisterItem = ({
         className={cn(
           'flex h-full grow cursor-pointer items-center gap-2 border p-2',
           inHoveredBank && 'border-foreground/40 bg-muted-foreground/25',
-          conflict && 'border-destructive text-destructive',
+          (conflict || issues?.length) && 'border-destructive text-destructive',
           instance && 'text-muted-foreground border-dashed'
         )}
         title={
           conflict
             ? `Address claimed by ${[...new Set(claims.map((entry) => entry.name))].join(' and ')}`
-            : undefined
+            : // A parameter can be widened from the panel while a completely
+              // different register is on screen, so flag it here too.
+              issues?.length
+              ? issues.map((issue) => `${issue.name}: ${issue.message}`).join('\n')
+              : undefined
         }
       >
         <span className='truncate'>
@@ -210,6 +215,15 @@ export const RegisterMap = () => {
   const setCurrentRegister = useCurrentRegisterStore((s) => s.setCurrentRegister)
 
   const addressMap = buildAddressMap(registers, parameters)
+
+  const issuesByAddr = new Map(
+    Object.entries(registers)
+      .map(([addr, reg]) => [
+        Number(addr),
+        fieldIssues(reg?.fields, dataWidth, parameters),
+      ])
+      .filter(([, issues]) => issues.length > 0)
+  )
 
   const step = dataWidth / 8
   // 2 ** addrWidth overflows past 53 bits, so cap the space at what a JS number
@@ -338,6 +352,7 @@ export const RegisterMap = () => {
                       step={step}
                       maxAddr={maxAddr}
                       claims={addressMap.get(row.addr)}
+                      issues={issuesByAddr.get(row.addr)}
                       hoveredReg={hoveredReg}
                       onHoverReg={setHoveredReg}
                       isDragging={row.addr === activeId}
