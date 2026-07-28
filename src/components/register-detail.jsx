@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, Fragment } from 'react'
+import { useEffect, useLayoutEffect, useState, useRef, Fragment } from 'react'
 import { useForm } from 'react-hook-form'
 
 import {
@@ -24,15 +24,7 @@ import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { useCurrentRegisterStore } from '@/store/current-register-store'
 
-import {
-  Pencil,
-  Plus,
-  Save,
-  X,
-  Trash2,
-  ChevronUp,
-  ChevronDown,
-} from 'lucide-react'
+import { GripVertical, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 
 import { RegisterDiagram } from './register-diagram'
 import { Badge } from './ui/badge'
@@ -82,16 +74,35 @@ const handleKeyDown = (e) => {
   next?.focus()
 }
 
+// Sentinels for the two "not a parameter" menu entries.
+const LITERAL_COUNT = '__number__'
+const FIXED_WIDTH = '__fixed__'
+
+/**
+ * The table renders fields sorted by bit position but writes edits back by
+ * array index, and the insert/move helpers shift neighbours assuming the array
+ * is in bit order too. Sorting on load keeps those in step: without it, a
+ * register whose JSON lists fields out of order (CTRL has flush after
+ * enc_active) sends every edit on those rows to the wrong field.
+ */
+const inBitOrder = (register) =>
+  register && {
+    ...register,
+    fields: [...(register.fields ?? [])].sort(
+      (a, b) => a.bitRange.lsb - b.bitRange.lsb
+    ),
+  }
+
 // ----------------------------------------------
 
-const FieldName = ({ field, isEditing, rf, watch }) => {
+const FieldName = ({ field, isEditing, rf }) => {
   return (
     <input
       {...rf(`fields.${field.trueIndex}.name`)}
       disabled={!isEditing}
-      size={Math.max(watch(`fields.${field.trueIndex}.name`)?.length || 1, 1)}
       className={cn(
-        'w-full border-none bg-transparent p-0',
+        // min-w-0 so the input cannot push its column wider than the header.
+        'w-full min-w-0 border-none bg-transparent p-0',
         'focus:ring-0 focus:outline-none'
       )}
       data-row={field.trueIndex}
@@ -173,19 +184,89 @@ const FieldBitRange = ({
     setLocal(formatBitRange(msb, parsed.lsb, parsed.width))
   }
 
+  // Picking a parameter rewrites the range as [lsb +: PARAM]; fixed freezes it
+  // back to whatever width it currently resolves to.
+  const onWidthSource = (value) => {
+    const lsb = field.bitRange.lsb
+    const width =
+      value === FIXED_WIDTH
+        ? field.bitRange.msb - lsb + 1
+        : resolveWidth({ lsb, width: value }, parameters)
+
+    setValue(
+      `fields.${field.trueIndex}.bitRange`,
+      value === FIXED_WIDTH
+        ? { msb: lsb + width - 1, lsb }
+        : { msb: lsb + width - 1, lsb, width: value },
+      { shouldDirty: true }
+    )
+  }
+
+  // Typing stays the primary route, with the parameters as completions.
+  const suggestionsId = `bits-${field.trueIndex}`
+  const suggestions = [
+    formatBitRange(field.bitRange.msb, field.bitRange.lsb),
+    ...parameters.map(
+      (parameter) => `[${field.bitRange.lsb} +: ${parameter.name}]`
+    ),
+  ]
+
   return (
-    <input
-      ref={inputRef}
-      type='text'
-      value={local}
-      title='e.g. [15:8], [3], or [8 +: NUM_LANES] for a parameter-wide field'
-      onChange={(e) => setLocal(e.target.value)}
-      onBlur={onBlur}
-      className={cn(
-        'w-28 border-none bg-transparent p-0 text-center font-mono',
-        'focus:ring-0 focus:outline-none'
+    <div className='flex items-center gap-1'>
+      <input
+        ref={inputRef}
+        type='text'
+        value={local}
+        list={parameters.length > 0 ? suggestionsId : undefined}
+        title='e.g. [15:8], [3], or [8 +: NUM_LANES] for a parameter-wide field'
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={onBlur}
+        className={cn(
+          'min-w-0 flex-1 border-none bg-transparent p-0 text-center font-mono',
+          'focus:ring-0 focus:outline-none'
+        )}
+      />
+
+      {parameters.length > 0 && (
+        <datalist id={suggestionsId}>
+          {[...new Set(suggestions)].map((suggestion) => (
+            <option
+              key={suggestion}
+              value={suggestion}
+            />
+          ))}
+        </datalist>
       )}
-    />
+
+      {/* Held at the empty option so it always reads as one glyph rather than
+          echoing the width the range already shows. A native select keeps it
+          clickable in a dense table without a portal. */}
+      {parameters.length > 0 && (
+        <select
+          value=''
+          onChange={(event) =>
+            event.target.value && onWidthSource(event.target.value)
+          }
+          title='Size this field with a parameter'
+          className={cn(
+            'text-muted-foreground hover:text-foreground w-4 shrink-0 cursor-pointer',
+            'appearance-none border-none bg-transparent p-0 text-center font-mono',
+            'text-sm italic outline-none'
+          )}
+        >
+          <option value=''>ƒ</option>
+          <option value={FIXED_WIDTH}>Fixed width</option>
+          {parameters.map((parameter) => (
+            <option
+              key={parameter.name}
+              value={parameter.name}
+            >
+              {parameter.name} bits
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
   )
 }
 
@@ -302,28 +383,65 @@ const FieldResetValue = ({ field, isEditing, setValue }) => {
       onChange={(e) => setLocal(e.target.value)}
       onBlur={onBlur}
       className={cn(
-        'w-16 border-none bg-transparent p-0 text-right font-mono',
+        'w-full min-w-0 border-none bg-transparent p-0 text-right font-mono',
         'focus:ring-0 focus:outline-none'
       )}
     />
   )
 }
 
-const FieldDesc = ({ field, isEditing, rf }) => {
+const fitToContent = (textarea) => {
+  if (!textarea) return
+
+  textarea.style.height = 'auto'
+  textarea.style.height = `${textarea.scrollHeight}px`
+}
+
+/**
+ * A textarea that stands exactly as tall as its text, so editing shows the same
+ * lines the read-only view does and leaves no dead space below them. Counts
+ * lines produced by wrapping, which a rows attribute cannot.
+ */
+const AutoGrowTextarea = ({ registered, value, className, ...props }) => {
+  const { ref: registerRef, ...rest } = registered
+  const textareaRef = useRef(null)
+
+  useLayoutEffect(() => fitToContent(textareaRef.current), [value])
+
+  return (
+    <textarea
+      {...rest}
+      {...props}
+      ref={(node) => {
+        registerRef(node)
+        textareaRef.current = node
+      }}
+      rows={1}
+      onInput={(event) => fitToContent(event.currentTarget)}
+      className={cn(
+        // A textarea's intrinsic width comes from its cols attribute, which
+        // would otherwise widen the whole table in edit mode.
+        'w-full min-w-0 resize-none overflow-hidden border-none bg-transparent p-0',
+        'focus:ring-0 focus:outline-none',
+        className
+      )}
+    />
+  )
+}
+
+const FieldDesc = ({ field, isEditing, rf, watch }) => {
+  const path = `fields.${field.trueIndex}.desc`
+
   if (!isEditing) {
     return <span className='whitespace-pre-wrap'>{field.desc}</span>
   }
 
   return (
-    <textarea
-      {...rf(`fields.${field.trueIndex}.desc`)}
-      rows={1}
+    <AutoGrowTextarea
+      registered={rf(path)}
+      value={watch(path)}
       data-row={field.trueIndex}
       data-col='desc'
-      className={cn(
-        'w-full resize-y border-none bg-transparent p-0',
-        'focus:ring-0 focus:outline-none'
-      )}
     />
   )
 }
@@ -332,17 +450,36 @@ const FieldDesc = ({ field, isEditing, rf }) => {
  * Turns a register into a repeated bank: `count` is a declared parameter name
  * or a literal, `stride` is the byte distance between instances, and instances
  * start at `firstIndex` (1 when index 0 lives in legacy registers).
+ *
+ * Renders as a fragment so it sits inline with the address in a wrapping row:
+ * off, it is just a switch; on, the controls and the resolved address
+ * expression wrap onto their own lines.
  */
 const RegisterArrayEditor = ({ addr, array, parameters, addrWidth, step, onChange }) => {
-  const countIsValid =
-    isLiteralCount(array?.count) ||
-    parameters.some((parameter) => parameter.name === array?.count)
+  const countIsParameter = parameters.some(
+    (parameter) => parameter.name === array?.count
+  )
+  const countIsValid = countIsParameter || isLiteralCount(array?.count)
+
+  const numberInput = (key, label, fallback) => (
+    <label
+      className='text-muted-foreground flex items-center gap-1 text-xs'
+      title={label}
+    >
+      {label}
+      <input
+        type='number'
+        className='h-6 w-16 rounded-md border px-1 font-mono text-xs'
+        value={array[key] ?? fallback}
+        onChange={(event) => onChange({ ...array, [key]: Number(event.target.value) })}
+      />
+    </label>
+  )
 
   return (
-    <div className='flex flex-col gap-2 rounded-md border p-3'>
-      <div className='flex items-center gap-2'>
+    <>
+      <label className='flex items-center gap-1.5 text-sm'>
         <Switch
-          id='array-toggle'
           checked={Boolean(array)}
           onCheckedChange={(checked) =>
             onChange(
@@ -352,77 +489,54 @@ const RegisterArrayEditor = ({ addr, array, parameters, addrWidth, step, onChang
             )
           }
         />
-        <label
-          htmlFor='array-toggle'
-          className='text-sm'
-        >
-          Repeat as array
-        </label>
-      </div>
+        Array
+      </label>
 
       {array && (
         <>
-          <div className='flex flex-wrap items-end gap-3'>
-            <label className='flex flex-col gap-1 text-xs'>
-              Count
-              <input
-                className='h-7 w-40 rounded-md border px-2 font-mono text-sm'
-                value={array.count ?? ''}
-                onChange={(event) => {
-                  const raw = event.target.value.trim()
-                  onChange({
-                    ...array,
-                    count: isLiteralCount(raw) ? Number(raw) : raw,
-                  })
-                }}
-              />
-            </label>
-
-            <label className='flex flex-col gap-1 text-xs'>
-              Stride (bytes)
-              <input
-                type='number'
-                className='h-7 w-24 rounded-md border px-2 font-mono text-sm'
-                value={array.stride ?? step}
-                onChange={(event) =>
-                  onChange({ ...array, stride: Number(event.target.value) })
-                }
-              />
-            </label>
-
-            <label className='flex flex-col gap-1 text-xs'>
-              First index
-              <input
-                type='number'
-                className='h-7 w-24 rounded-md border px-2 font-mono text-sm'
-                value={array.firstIndex ?? 0}
-                onChange={(event) =>
-                  onChange({ ...array, firstIndex: Number(event.target.value) })
-                }
-              />
-            </label>
-          </div>
-
           {parameters.length > 0 && (
-            <div className='flex flex-wrap items-center gap-1 text-xs'>
-              <span className='text-muted-foreground'>Parameters:</span>
-              {parameters.map((parameter) => (
-                <button
-                  key={parameter.name}
-                  type='button'
-                  className='hover:bg-accent rounded-md border px-1.5 py-0.5 font-mono'
-                  title={`${parameter.name} = ${parameter.value}`}
-                  onClick={() => onChange({ ...array, count: parameter.name })}
-                >
-                  {parameter.name}
-                </button>
-              ))}
-            </div>
+            <Select
+              value={countIsParameter ? array.count : LITERAL_COUNT}
+              onValueChange={(value) =>
+                onChange({
+                  ...array,
+                  count: value === LITERAL_COUNT ? Number(array.count) || 2 : value,
+                })
+              }
+            >
+              <SelectTrigger
+                data-size='none'
+                className='h-6 gap-1 px-1 py-0 font-mono text-xs'
+                title='Count: a declared parameter, or a fixed number'
+              >
+                <SelectValue />
+              </SelectTrigger>
+
+              <SelectContent>
+                {parameters.map((parameter) => (
+                  <SelectItem
+                    key={parameter.name}
+                    value={parameter.name}
+                    title={`${parameter.name} = ${parameter.value}`}
+                  >
+                    {parameter.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value={LITERAL_COUNT}>Number…</SelectItem>
+              </SelectContent>
+            </Select>
           )}
 
+          {!countIsParameter &&
+            numberInput('count', parameters.length > 0 ? '' : 'count', 2)}
+
+          {numberInput('stride', 'stride', step)}
+          {numberInput('firstIndex', 'from', 0)}
+
+          {/* w-full breaks the wrapping row, so this always gets its own line */}
           <p
             className={cn(
-              'font-mono text-xs',
+              'w-full font-mono text-xs',
               countIsValid ? 'text-muted-foreground' : 'text-destructive'
             )}
           >
@@ -432,7 +546,7 @@ const RegisterArrayEditor = ({ addr, array, parameters, addrWidth, step, onChang
           </p>
         </>
       )}
-    </div>
+    </>
   )
 }
 
@@ -470,6 +584,9 @@ export const RegisterDetail = () => {
   // Bit position of the field under the cursor, shared by the table and the
   // diagram so hovering either one lights up the other.
   const [highlightLsb, setHighlightLsb] = useState(null)
+  // Field being dragged, and the row it is currently over.
+  const [dragField, setDragField] = useState(null)
+  const [dropField, setDropField] = useState(null)
 
   const {
     register: rf,
@@ -478,13 +595,13 @@ export const RegisterDetail = () => {
     handleSubmit,
     setValue,
   } = useForm({
-    defaultValues: registerData,
+    defaultValues: inBitOrder(registerData),
   })
 
   // Sync when register changes.
   useEffect(() => {
     if (registerData) {
-      reset(registerData)
+      reset(inBitOrder(registerData))
       setIsEditing(false)
     }
   }, [registerData, reset])
@@ -503,16 +620,35 @@ export const RegisterDetail = () => {
 
   const fullFields = normalizeRegister(fields, dataWidth)
 
+  // The Bits column follows the widest range in this register: a single fixed
+  // width is wasteful for [3] and clips [8 +: NUM_LANES]. Measured from the
+  // labels alone, so it does not change between view and edit mode.
+  const bitsColumnChars = Math.max(
+    'Bits'.length,
+    ...fullFields.map(
+      (field) =>
+        formatBitRange(field.bitRange.msb, field.bitRange.lsb, field.bitRange.width)
+          .length
+    )
+  )
+
   const totalBitsUsed = calcTotalBitsUsed(fields)
   const canInsert = isEditing && totalBitsUsed < dataWidth
 
   const onSave = handleSubmit((formData) => {
+    // Guarded as well as disabled, so a keyboard submit cannot slip a register
+    // with overlapping or oversized fields into the document.
+    if (issues.length > 0) {
+      toast.error(`Fix ${issues.length} field problem(s) before saving`)
+      return
+    }
+
     updateRegister(addr, formData)
     setIsEditing(false)
   })
 
   const onCancel = () => {
-    reset(registerData)
+    reset(inBitOrder(registerData))
     setIsEditing(false)
   }
 
@@ -587,71 +723,89 @@ export const RegisterDetail = () => {
     )
   }
 
-  const swapField = (index, direction) => {
-    const updatedFields = [...fields]
-    let self = updatedFields[index]
-    if (!self) return
-    self = { ...self, bitRange: { ...self.bitRange } }
-    const selfWidth = getFieldWidth(self)
-
-    const otherIndex = direction === 'up' ? index - 1 : index + 1
-
-    let other = updatedFields[otherIndex]
-    if (!other) {
-      if (direction == 'up' && self.bitRange.lsb > 0) {
-        self.bitRange.lsb = 0
-        self.bitRange.msb = selfWidth - 1
-      } else if (direction == 'down' && self.bitRange.msb < dataWidth - 1) {
-        self.bitRange.msb = dataWidth - 1
-        self.bitRange.lsb = self.bitRange.msb - selfWidth + 1
-      } else if (direction !== 'up' && direction !== 'down') {
-        toast.error('Invalid direction')
-        return
-      }
-      updatedFields[index] = self
-    } else {
-      other = { ...other, bitRange: { ...other.bitRange } }
-
-      const isAdjacent =
-        direction == 'up'
-          ? self.bitRange.lsb - 1 == other.bitRange.msb
-          : self.bitRange.msb + 1 == other.bitRange.lsb
-
-      const otherWidth = getFieldWidth(other)
-
-      if (isAdjacent) {
-        if (direction == 'up') {
-          self.bitRange.lsb = other.bitRange.lsb
-          self.bitRange.msb = self.bitRange.lsb + selfWidth - 1
-          other.bitRange.lsb = self.bitRange.msb + 1
-          other.bitRange.msb = other.bitRange.lsb + otherWidth - 1
-        } else if (direction == 'down') {
-          other.bitRange.lsb = self.bitRange.lsb
-          other.bitRange.msb = other.bitRange.lsb + otherWidth - 1
-          self.bitRange.lsb = other.bitRange.msb + 1
-          self.bitRange.msb = self.bitRange.lsb + selfWidth - 1
-        } else {
-          toast.error('Invalid direction')
-          return
-        }
-        updatedFields[index] = other
-        updatedFields[otherIndex] = self
-      } else {
-        if (direction == 'up') {
-          self.bitRange.lsb = other.bitRange.msb + 1
-          self.bitRange.msb = self.bitRange.lsb + selfWidth - 1
-        } else if (direction == 'down') {
-          self.bitRange.msb = other.bitRange.lsb - 1
-          self.bitRange.lsb = self.bitRange.msb - selfWidth + 1
-        } else {
-          toast.error('Invalid direction')
-          return
-        }
-        updatedFields[index] = self
-        updatedFields[otherIndex] = other
-      }
+  /**
+   * Drop a field at another field's position. Widths are preserved and the
+   * gaps keep their place in the sequence, so a bank of reserved bits stays
+   * between the same two neighbours instead of being packed away.
+   */
+  const moveField = (fromIndex, toIndex) => {
+    if (fromIndex === toIndex || fields[fromIndex] == null || fields[toIndex] == null) {
+      return
     }
-    setValue('fields', updatedFields)
+
+    const gaps = []
+    let cursor = 0
+    for (const [index, field] of fields.entries()) {
+      gaps[index] = field.bitRange.lsb - cursor
+      cursor = field.bitRange.msb + 1
+    }
+
+    const reordered = [...fields]
+    reordered.splice(toIndex, 0, ...reordered.splice(fromIndex, 1))
+
+    let bit = 0
+    const relaid = reordered.map((field, index) => {
+      bit += gaps[index]
+      const width = getFieldWidth(field)
+      const placed = {
+        ...field,
+        bitRange: { ...field.bitRange, lsb: bit, msb: bit + width - 1 },
+      }
+      bit += width
+      return placed
+    })
+
+    setValue('fields', relaid, { shouldDirty: true })
+  }
+
+  /**
+   * Drops are addressed by bit, so a reserved gap is a valid destination: the
+   * field takes the position in the sequence that the gap occupies.
+   */
+  const moveFieldToBit = (fromLsb, targetBit) => {
+    const from = fields.findIndex((field) => field.bitRange.lsb === fromLsb)
+    if (from < 0) return
+
+    // Onto another field: take its place in the sequence.
+    const onField = fields.findIndex(
+      (field) => targetBit >= field.bitRange.lsb && targetBit <= field.bitRange.msb
+    )
+    if (onField >= 0) {
+      moveField(from, onField)
+      return
+    }
+
+    // Into free space: park it at the start of the hole and leave every other
+    // field where it is. Measured with the dragged field lifted out, so the
+    // bits it vacates count as part of the hole.
+    const others = fields.filter((_, index) => index !== from)
+    const before = others.filter((field) => field.bitRange.msb < targetBit).pop()
+    const after = others.find((field) => field.bitRange.lsb > targetBit)
+    const gapStart = before ? before.bitRange.msb + 1 : 0
+    const gapEnd = after ? after.bitRange.lsb - 1 : dataWidth - 1
+    const width = getFieldWidth(fields[from])
+
+    if (gapEnd - gapStart + 1 >= width) {
+      const moved = {
+        ...fields[from],
+        bitRange: {
+          ...fields[from].bitRange,
+          lsb: gapStart,
+          msb: gapStart + width - 1,
+        },
+      }
+
+      setValue(
+        'fields',
+        [...others, moved].sort((a, b) => a.bitRange.lsb - b.bitRange.lsb),
+        { shouldDirty: true }
+      )
+      return
+    }
+
+    // Too wide for the hole: fall back to taking that spot in the sequence.
+    const afterGap = fields.findIndex((field) => field.bitRange.lsb > targetBit)
+    moveField(from, afterGap >= 0 ? afterGap : fields.length - 1)
   }
 
   return (
@@ -697,6 +851,12 @@ export const RegisterDetail = () => {
             <div className='flex items-center gap-2'>
               <Button
                 onClick={onSave}
+                disabled={issues.length > 0}
+                title={
+                  issues.length > 0
+                    ? `Fix ${issues.length} field problem(s) before saving`
+                    : 'Save register'
+                }
                 className='h-8 w-8'
                 variant='outline'
                 size='icon'
@@ -716,58 +876,54 @@ export const RegisterDetail = () => {
           )}
         </div>
 
+        {/* Address row: the array controls live here rather than in a block of
+            their own, so an ordinary register costs one small switch. */}
         <div className='flex flex-wrap items-center gap-2'>
           <Badge className='font-mono'>
             0x{addr.toString(16).padStart(4, '0')}
           </Badge>
 
-          {registerArray && (
-            <Badge
-              variant='secondary'
-              className='font-mono'
-              title={formatArrayRange(registerArray)}
-            >
-              ×{registerArray.count} · {formatArrayAddress(addr, registerArray, addrWidth)}
-            </Badge>
+          {registerArray && !isEditing && (
+            <>
+              <Badge
+                variant='secondary'
+                className='font-mono'
+                title={formatArrayRange(registerArray)}
+              >
+                ×{registerArray.count} ·{' '}
+                {formatArrayAddress(addr, registerArray, addrWidth)}
+              </Badge>
+
+              <Button
+                variant='outline'
+                size='sm'
+                className='h-6'
+                title='Create another register interleaved into this bank'
+                onClick={addBankSibling}
+              >
+                <Plus className='h-3 w-3' />
+                Add to bank
+              </Button>
+            </>
           )}
 
-          {registerArray && !isEditing && (
-            <Button
-              variant='outline'
-              size='sm'
-              className='h-6'
-              title='Create another register interleaved into this bank'
-              onClick={addBankSibling}
-            >
-              <Plus className='h-3 w-3' />
-              Add to bank
-            </Button>
+          {isEditing && (
+            <RegisterArrayEditor
+              addr={addr}
+              array={registerArray}
+              parameters={parameters ?? []}
+              addrWidth={addrWidth}
+              step={step}
+              onChange={(next) => setValue('array', next, { shouldDirty: true })}
+            />
           )}
         </div>
 
-        {isEditing && (
-          <RegisterArrayEditor
-            addr={addr}
-            array={registerArray}
-            parameters={parameters ?? []}
-            addrWidth={addrWidth}
-            step={step}
-            onChange={(next) =>
-              setValue('array', next, { shouldDirty: true })
-            }
-          />
-        )}
-
         {isEditing ? (
-          <textarea
-            {...rf('description')}
-            rows={3}
+          <AutoGrowTextarea
+            registered={rf('description')}
+            value={watch('description')}
             placeholder='Add description...'
-            className={cn(
-              'w-full',
-              'border-none bg-transparent p-0',
-              'focus:ring-0 focus:outline-none'
-            )}
           />
         ) : (
           <p className='whitespace-pre-wrap'>{registerData.description}</p>
@@ -794,21 +950,35 @@ export const RegisterDetail = () => {
           dataWidth={dataWidth}
           highlightLsb={highlightLsb}
           onHighlight={setHighlightLsb}
+          onMoveField={isEditing ? moveFieldToBit : undefined}
         />
       </div>
 
       {/* ---------- Table ---------- */}
       <div className='flex w-full grow justify-center'>
-        <Table>
+        {/* table-fixed: columns follow the header widths instead of the widest
+            content, so switching to edit mode cannot re-flow or widen the
+            table just because its cells became inputs. */}
+        <Table className='table-fixed'>
           <TableHeader>
             <TableRow>
-              {isEditing && (
-                <TableHead className='w-10 text-center'>Actions</TableHead>
-              )}
-              <TableHead className='min-w-40'>Field</TableHead>
-              <TableHead className='min-w-20 text-center'>Bits</TableHead>
-              <TableHead className='min-w-20 text-center'>Type</TableHead>
-              <TableHead className='min-w-20 text-right'>Reset</TableHead>
+              {/* Widths are held constant across view and edit mode: the
+                  columns are always present, so the table does not jump when
+                  the row actions and inputs appear. */}
+              <TableHead className='w-24 text-center'>
+                {isEditing ? 'Actions' : ''}
+              </TableHead>
+              <TableHead className='w-44'>Field</TableHead>
+              {/* font-mono so the ch unit measures the same glyphs the cells
+                  below use; the slack covers padding and the ƒ button. */}
+              <TableHead
+                className='text-center font-mono'
+                style={{ width: `calc(${bitsColumnChars}ch + 3rem)` }}
+              >
+                Bits
+              </TableHead>
+              <TableHead className='w-24 text-center'>Type</TableHead>
+              <TableHead className='w-20 text-right'>Reset</TableHead>
               <TableHead>Description</TableHead>
             </TableRow>
           </TableHeader>
@@ -833,14 +1003,32 @@ export const RegisterDetail = () => {
                     // so a highlighted RESERVED row would not change at all.
                     highlightLsb === field.bitRange.lsb &&
                       'bg-muted-foreground/25',
+                    dropField === field.bitRange.lsb &&
+                      dragField !== field.trueIndex &&
+                      'border-foreground border-t-2',
                     'align-top'
                   )}
+                  onDragOver={(event) => {
+                    if (dragField == null) return
+                    event.preventDefault()
+                    setDropField(field.bitRange.lsb)
+                  }}
+                  onDrop={(event) => {
+                    if (dragField == null) return
+                    event.preventDefault()
+                    moveFieldToBit(
+                      fields[dragField]?.bitRange.lsb,
+                      field.bitRange.lsb
+                    )
+                    setDragField(null)
+                    setDropField(null)
+                  }}
                   onMouseEnter={() => setHighlightLsb(field.bitRange.lsb)}
                   onMouseLeave={() => setHighlightLsb(null)}
                 >
                   {field.name == 'RESERVED' ? (
                     <>
-                      {isEditing && <TableCell />}
+                      <TableCell />
 
                       <TableCell className='align-top font-medium'>
                         {field.name}
@@ -868,44 +1056,50 @@ export const RegisterDetail = () => {
                     </>
                   ) : (
                     <>
-                      {isEditing && (
-                        <TableCell className='flex gap-1 text-center align-top'>
-                          <Button
-                            size='icon'
-                            variant='outline'
-                            className='h-6 w-6 cursor-pointer'
-                            disabled={field.bitRange.lsb == 0}
-                            onClick={() => swapField(field.trueIndex, 'up')}
-                          >
-                            <ChevronUp />
-                          </Button>
+                      <TableCell className='align-top'>
+                        {isEditing && (
+                          <div className='flex items-center gap-1'>
+                            {/* draggable sits on the handle, not the row, so
+                                dragging inside a cell still selects text. */}
+                            <div
+                              draggable
+                              title='Drag to move this field'
+                              onDragStart={(event) => {
+                                event.dataTransfer.effectAllowed = 'move'
+                                const row = event.currentTarget.closest('tr')
+                                if (row) event.dataTransfer.setDragImage(row, 0, 0)
+                                setDragField(field.trueIndex)
+                              }}
+                              onDragEnd={() => {
+                                setDragField(null)
+                                setDropField(null)
+                              }}
+                              className={cn(
+                                'text-muted-foreground hover:text-foreground',
+                                'flex h-6 w-6 cursor-grab items-center justify-center',
+                                'rounded-md border active:cursor-grabbing'
+                              )}
+                            >
+                              <GripVertical className='h-3 w-3' />
+                            </div>
 
-                          <Button
-                            size='icon'
-                            variant='outline'
-                            className='h-6 w-6 cursor-pointer'
-                            disabled={field.bitRange.msb == dataWidth - 1}
-                            onClick={() => swapField(field.trueIndex, 'down')}
-                          >
-                            <ChevronDown />
-                          </Button>
-                          <Button
-                            variant='outline'
-                            size='icon'
-                            className='h-6 w-6 cursor-pointer'
-                            onClick={() => removeField(field.trueIndex)}
-                          >
-                            <Trash2 className='text-destructive h-3 w-3' />
-                          </Button>
-                        </TableCell>
-                      )}
+                            <Button
+                              variant='outline'
+                              size='icon'
+                              className='h-6 w-6 cursor-pointer'
+                              onClick={() => removeField(field.trueIndex)}
+                            >
+                              <Trash2 className='text-destructive h-3 w-3' />
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
 
                       <TableCell className='align-top font-medium'>
                         <FieldName
                           field={field}
                           isEditing={isEditing}
                           rf={rf}
-                          watch={watch}
                         />
                       </TableCell>
 
@@ -919,13 +1113,18 @@ export const RegisterDetail = () => {
                         />
                       </TableCell>
 
-                      <TableCell className='flex items-center justify-center align-top'>
-                        <FieldType
-                          field={field}
-                          isEditing={isEditing}
-                          setValue={setValue}
-                          watch={watch}
-                        />
+                      {/* No flex on the cell itself: display:flex takes it out
+                          of the table layout, so the column stops lining up
+                          with its header and the other rows. */}
+                      <TableCell className='text-center align-top'>
+                        <div className='flex items-center justify-center'>
+                          <FieldType
+                            field={field}
+                            isEditing={isEditing}
+                            setValue={setValue}
+                            watch={watch}
+                          />
+                        </div>
                       </TableCell>
 
                       <TableCell className='text-right align-top font-mono'>
@@ -941,6 +1140,7 @@ export const RegisterDetail = () => {
                           field={field}
                           isEditing={isEditing}
                           rf={rf}
+                          watch={watch}
                         />
                       </TableCell>
                     </>
