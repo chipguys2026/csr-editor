@@ -1,6 +1,11 @@
 import * as XLSX from 'xlsx-js-style'
 
-import { formatArrayAddress, formatArrayRange } from './register'
+import {
+  formatArrayAddress,
+  formatArrayRange,
+  formatBitRange,
+  resolveWidth,
+} from './register'
 
 /** Arrays document an address expression instead of a single address. */
 const registerAddress = (addr, reg) => {
@@ -49,8 +54,14 @@ export const generateExcelData = (params, registers) => {
     })
     // Add field rows
     reg.fields.forEach((field) => {
-      const bitRange = `[${field.bitRange.msb}:${field.bitRange.lsb}]`
-      const width = field.bitRange.msb - field.bitRange.lsb + 1
+      // A parameter-wide field documents the expression, e.g. [8 +: NUM_LANES].
+      const bitRange = formatBitRange(
+        field.bitRange.msb,
+        field.bitRange.lsb,
+        field.bitRange.width
+      )
+      const width =
+        field.bitRange.width ?? resolveWidth(field.bitRange, params.parameters)
       const resetValueHex = `0x${field.resetValue.toString(16).toUpperCase()}`
       registerRows.push({
         isRegisterRow: false,
@@ -186,8 +197,14 @@ export const exportToExcel = (filename, params, registers) => {
     ])
     // Add field rows
     reg.fields.forEach((field) => {
-      const bitRange = `[${field.bitRange.msb}:${field.bitRange.lsb}]`
-      const width = field.bitRange.msb - field.bitRange.lsb + 1
+      // A parameter-wide field documents the expression, e.g. [8 +: NUM_LANES].
+      const bitRange = formatBitRange(
+        field.bitRange.msb,
+        field.bitRange.lsb,
+        field.bitRange.width
+      )
+      const width =
+        field.bitRange.width ?? resolveWidth(field.bitRange, params.parameters)
       const resetValueHex = `0x${field.resetValue.toString(16).toUpperCase()}`
       registerData.push([
         '',

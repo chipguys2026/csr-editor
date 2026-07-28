@@ -7,8 +7,12 @@ import {
   calcTotalBitsUsed,
   formatArrayAddress,
   formatArrayRange,
+  fieldIssues,
   formatBitRange,
   isLiteralCount,
+  parseBitRange,
+  resolveFields,
+  resolveWidth,
 } from '@/lib/register'
 import { accessTypes } from '@/lib/access-types'
 import { buildAddressMap } from '@/lib/address-map'
@@ -97,51 +101,57 @@ const FieldName = ({ field, isEditing, rf, watch }) => {
   )
 }
 
-const FieldBitRange = ({ field, isEditing, setValue, isOverlap }) => {
+const FieldBitRange = ({
+  field,
+  isEditing,
+  setValue,
+  isOverlap,
+  parameters,
+  dataWidth,
+}) => {
   const inputRef = useRef(null)
 
-  const [local, setLocal] = useState(
-    formatBitRange(field.bitRange.msb, field.bitRange.lsb)
+  const display = formatBitRange(
+    field.bitRange.msb,
+    field.bitRange.lsb,
+    field.bitRange.width
   )
+  const [local, setLocal] = useState(display)
 
   // Sync when field changes (insert/reset).
   useEffect(() => {
-    setLocal(formatBitRange(field.bitRange.msb, field.bitRange.lsb))
-  }, [field.bitRange.msb, field.bitRange.lsb])
+    setLocal(display)
+  }, [display])
 
   if (!isEditing) {
-    return <>{formatBitRange(field.bitRange.msb, field.bitRange.lsb)}</>
+    return <>{display}</>
   }
 
   const onBlur = () => {
-    const raw = local.trim()
+    const parsed = parseBitRange(local)
+    const width = resolveWidth(parsed, parameters)
 
-    // ---- strip [] ----
-    const stripped = raw.replace(/[\[\]]/g, '')
-
-    let msb, lsb
-
-    // ---- parse ----
-    if (stripped.includes(':')) {
-      const [m, l] = stripped.split(':').map((v) => Number(v))
-      msb = m
-      lsb = l
-    } else {
-      msb = lsb = Number(stripped)
-    }
-
-    // ---- validate ----
+    // A width expression must name a declared parameter, and whatever it
+    // resolves to still has to fit the register without overlapping.
+    const msb = width == null ? NaN : parsed.lsb + width - 1
+    const tooWide = msb >= dataWidth
     const invalid =
       Number.isNaN(msb) ||
-      Number.isNaN(lsb) ||
-      msb < lsb ||
-      msb < 0 ||
-      lsb < 0 ||
-      (isOverlap && isOverlap(field.trueIndex, msb, lsb))
+      Number.isNaN(parsed.lsb) ||
+      msb < parsed.lsb ||
+      parsed.lsb < 0 ||
+      tooWide ||
+      (isOverlap && isOverlap(field.trueIndex, msb, parsed.lsb))
 
     if (invalid) {
       // rollback + refocus
-      toast.error('Invalid bit range')
+      toast.error(
+        width == null
+          ? `'${parsed.width}' is not a declared parameter`
+          : tooWide
+            ? `Bit ${msb} is past the ${dataWidth}-bit register`
+            : 'Invalid bit range'
+      )
       requestAnimationFrame(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
@@ -152,12 +162,15 @@ const FieldBitRange = ({ field, isEditing, setValue, isOverlap }) => {
     // ---- commit ----
     setValue(
       `fields.${field.trueIndex}.bitRange`,
-      { msb, lsb },
+      // msb is stored resolved so the diagram, overlap checks and Excel keep
+      // working on plain numbers; width is what the RTL is generated from.
+      parsed.width == null
+        ? { msb, lsb: parsed.lsb }
+        : { msb, lsb: parsed.lsb, width: parsed.width },
       { shouldDirty: true }
     )
 
-    // normalize display
-    setLocal(formatBitRange(msb, lsb))
+    setLocal(formatBitRange(msb, parsed.lsb, parsed.width))
   }
 
   return (
@@ -165,10 +178,11 @@ const FieldBitRange = ({ field, isEditing, setValue, isOverlap }) => {
       ref={inputRef}
       type='text'
       value={local}
+      title='e.g. [15:8], [3], or [8 +: NUM_LANES] for a parameter-wide field'
       onChange={(e) => setLocal(e.target.value)}
       onBlur={onBlur}
       className={cn(
-        'w-14 border-none bg-transparent p-0 text-center font-mono',
+        'w-28 border-none bg-transparent p-0 text-center font-mono',
         'focus:ring-0 focus:outline-none'
       )}
     />
@@ -209,45 +223,6 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
         ))}
       </SelectContent>
     </Select>
-  )
-}
-
-/**
- * Optional vector width for an RO field: the port becomes `[EXPR-1:0]` and the
- * generator copies as many bits as both the port and the field have.
- */
-const FieldPortWidth = ({ field, isEditing, setValue }) => {
-  const isRo = field.type === 'RO'
-
-  if (!isEditing) {
-    return field.portWidth ? (
-      <Badge
-        variant='secondary'
-        className='font-mono'
-      >
-        [{field.portWidth}]
-      </Badge>
-    ) : null
-  }
-
-  return (
-    <input
-      type='text'
-      disabled={!isRo}
-      placeholder={isRo ? '—' : ''}
-      title={isRo ? 'Parameter or literal port width' : 'RO fields only'}
-      value={field.portWidth ?? ''}
-      onChange={(event) => {
-        const raw = event.target.value.trim()
-        setValue(`fields.${field.trueIndex}.portWidth`, raw === '' ? undefined : raw, {
-          shouldDirty: true,
-        })
-      }}
-      className={cn(
-        'w-24 border-none bg-transparent p-0 text-center font-mono',
-        'focus:ring-0 focus:outline-none disabled:opacity-40'
-      )}
-    />
   )
 }
 
@@ -516,16 +491,20 @@ export const RegisterDetail = () => {
 
   if (!registerData) return null
 
-  const fields = watch('fields')
   const registerArray = watch('array')
 
-  const fullFields = normalizeRegister(fields)
+  // Parameter-wide fields carry a resolved msb, but the parameter may have
+  // changed since it was written, so resolve again before laying anything out.
+  const fields = resolveFields(watch('fields'), parameters ?? [])
+
+  // Editing a bit range validates it, but a parameter can be widened or
+  // renamed later, so the register is re-checked on every render.
+  const issues = fieldIssues(watch('fields'), dataWidth, parameters ?? [])
+
+  const fullFields = normalizeRegister(fields, dataWidth)
 
   const totalBitsUsed = calcTotalBitsUsed(fields)
   const canInsert = isEditing && totalBitsUsed < dataWidth
-  // Vector ports are niche: only take the column when it is in use.
-  const showPortColumn =
-    isEditing || fields.some((field) => field.portWidth)
 
   const onSave = handleSubmit((formData) => {
     updateRegister(addr, formData)
@@ -795,6 +774,19 @@ export const RegisterDetail = () => {
         )}
       </div>
 
+      {/* ---------- Issues ---------- */}
+      {issues.length > 0 && (
+        <div className='border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-sm'>
+          <ul className='space-y-1'>
+            {issues.map((issue, index) => (
+              <li key={`issue${index}`}>
+                <span className='font-medium'>{issue.name}</span>: {issue.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* ---------- Diagram ---------- */}
       <div className='flex w-full justify-center'>
         <RegisterDiagram
@@ -816,9 +808,6 @@ export const RegisterDetail = () => {
               <TableHead className='min-w-40'>Field</TableHead>
               <TableHead className='min-w-20 text-center'>Bits</TableHead>
               <TableHead className='min-w-20 text-center'>Type</TableHead>
-              {showPortColumn && (
-                <TableHead className='min-w-24 text-center'>Port</TableHead>
-              )}
               <TableHead className='min-w-20 text-right'>Reset</TableHead>
               <TableHead>Description</TableHead>
             </TableRow>
@@ -867,8 +856,6 @@ export const RegisterDetail = () => {
                       <TableCell className='text-center align-top'>
                         <Badge variant='outline'>{field.type}</Badge>
                       </TableCell>
-
-                      {showPortColumn && <TableCell />}
 
                       <TableCell className='text-right align-top font-mono'>
                         {hex(
@@ -927,6 +914,8 @@ export const RegisterDetail = () => {
                           field={field}
                           isEditing={isEditing}
                           setValue={setValue}
+                          parameters={parameters ?? []}
+                          dataWidth={dataWidth}
                         />
                       </TableCell>
 
@@ -938,16 +927,6 @@ export const RegisterDetail = () => {
                           watch={watch}
                         />
                       </TableCell>
-
-                      {showPortColumn && (
-                        <TableCell className='text-center align-top'>
-                          <FieldPortWidth
-                            field={field}
-                            isEditing={isEditing}
-                            setValue={setValue}
-                          />
-                        </TableCell>
-                      )}
 
                       <TableCell className='text-right align-top font-mono'>
                         <FieldResetValue

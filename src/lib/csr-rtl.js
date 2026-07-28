@@ -45,12 +45,26 @@ const zeroLiteral = (width) => (width === 1 ? "1'b0" : `{${width}{1'b0}}`)
 const reduceOr = (expr, width) => (width === 1 ? expr : `|${expr}`)
 const pad = (text, size) => text + ' '.repeat(Math.max(1, size - text.length))
 const hexAddr = (addr) => `0x${addr.toString(16).toUpperCase().padStart(4, '0')}`
-// A port is normally as wide as its field, but a field with `portWidth` is fed
-// by a parameter-width vector and only its low bits land in the register.
+// A field is normally a fixed number of bits, but its width may instead be a
+// parameter, in which case every reference to it stays symbolic.
 const portWidthDecl = (port) =>
   port.widthExpr ? `[${port.widthExpr}-1:0] ` : widthDecl(port.width)
 const widthColumnSize = (ports) =>
   Math.max(0, ...ports.map((port) => portWidthDecl(port).length))
+
+/** `[15:8]`, or SystemVerilog's `[8 +: NUM_LANES]` for a parameter width. */
+const fieldSel = (field) =>
+  field.widthExpr
+    ? `[${field.lsb} +: ${field.widthExpr}]`
+    : bitSel(field.msb, field.lsb)
+const fieldWidthDecl = (field) =>
+  field.widthExpr ? `[${field.widthExpr}-1:0] ` : widthDecl(field.width)
+const fieldZero = (field) =>
+  field.widthExpr ? `{${field.widthExpr}{1'b0}}` : zeroLiteral(field.width)
+const fieldReset = (field) =>
+  field.widthExpr
+    ? `${field.widthExpr}'(${field.reset})`
+    : resetLiteral(field.width, field.reset)
 const arrayDimSuffix = (port) => (port.arrayDim ? ` [${port.arrayDim}]` : '')
 const moduleNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 const RESERVED_PARAMETERS = ['ADDR_WIDTH', 'DATA_WIDTH']
@@ -125,11 +139,9 @@ const collectPorts = (regs) => {
           name: `${field.sig}_i`,
           dir: 'input',
           width: field.width,
-          widthExpr: field.portWidth?.expr ?? null,
+          widthExpr: field.widthExpr,
           arrayDim,
-          comment: field.portWidth
-            ? `${label}, low ${field.width} bits of the vector`
-            : label,
+          comment: label,
         })
         continue
       }
@@ -138,6 +150,7 @@ const collectPorts = (regs) => {
         name: `${field.sig}_o`,
         dir: 'output',
         width: field.width,
+        widthExpr: field.widthExpr,
         arrayDim,
         comment: label,
       })
@@ -147,6 +160,7 @@ const collectPorts = (regs) => {
           name: `${field.sig}_set_i`,
           dir: 'input',
           width: field.width,
+          widthExpr: field.widthExpr,
           arrayDim,
           comment: `${label} hardware set strobe`,
         })
@@ -269,35 +283,28 @@ const buildArray = (spec, { reg, parameters, step }) => {
 }
 
 /**
- * Resolve a field's optional `portWidth`: the input port becomes a vector sized
- * by a parameter (or literal) while the field still occupies a fixed bit range,
- * so readback copies however many bits both sides have.
+ * A field's width is either fixed by its msb/lsb or given as `bitRange.width`,
+ * a parameter name or literal. The parameterised form keeps the RTL symbolic
+ * (`[8 +: NUM_LANES]`) while everything that needs a number uses the width the
+ * parameter currently holds.
  */
-const buildPortWidth = (spec, { reg, field, parameters }) => {
+const buildFieldWidth = (bitRange, { regName, fieldName, parameters }) => {
+  const lsb = Number(bitRange?.lsb)
+  const spec = bitRange?.width
+
   if (spec == null || spec === '') {
-    return null
-  }
-
-  if (field.access !== 'RO') {
-    throw new Error(
-      `${reg.name}.${field.name}: portWidth is only supported on RO fields`
-    )
-  }
-
-  if (reg.array) {
-    throw new Error(
-      `${reg.name}.${field.name}: portWidth cannot be combined with a register array`
-    )
+    const msb = Number(bitRange?.msb)
+    return { lsb, msb, width: msb - lsb + 1, widthExpr: null }
   }
 
   if (typeof spec === 'number' || /^\d+$/.test(String(spec).trim())) {
-    const literal = Number(spec)
+    const width = Number(spec)
 
-    if (!Number.isInteger(literal) || literal <= 0) {
-      throw new Error(`${reg.name}.${field.name}: portWidth must be positive`)
+    if (!Number.isInteger(width) || width <= 0) {
+      throw new Error(`${regName}.${fieldName}: bit width must be positive`)
     }
 
-    return { expr: String(literal) }
+    return { lsb, msb: lsb + width - 1, width, widthExpr: null }
   }
 
   const name = String(spec).trim()
@@ -305,11 +312,16 @@ const buildPortWidth = (spec, { reg, field, parameters }) => {
 
   if (!parameter) {
     throw new Error(
-      `${reg.name}.${field.name}: portWidth '${name}' is not a declared parameter`
+      `${regName}.${fieldName}: bit width '${name}' is not a declared parameter`
     )
   }
 
-  return { expr: parameter.name }
+  return {
+    lsb,
+    msb: lsb + parameter.value - 1,
+    width: parameter.value,
+    widthExpr: parameter.name,
+  }
 }
 
 /** Byte addresses a register occupies, worst case for arrays. */
@@ -359,18 +371,18 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
 
   const regs = Object.entries(registerMap).map(([addrText, register]) => {
     const fields = (register?.fields ?? []).map((field) => {
-      const msb = Number(field?.bitRange?.msb)
-      const lsb = Number(field?.bitRange?.lsb)
+      const fieldName = String(field?.name ?? '')
 
       return {
-        name: String(field?.name ?? ''),
+        name: fieldName,
         access: String(field?.type ?? '').toUpperCase(),
-        msb,
-        lsb,
         reset: Number(field?.resetValue ?? 0),
-        width: msb - lsb + 1,
-        signalBase: sanitizeName(String(field?.name ?? '')),
-        portWidthSpec: field?.portWidth ?? null,
+        signalBase: sanitizeName(fieldName),
+        ...buildFieldWidth(field?.bitRange, {
+          regName: String(register?.name ?? `REG_${addrText}`),
+          fieldName,
+          parameters,
+        }),
       }
     })
 
@@ -470,12 +482,6 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
         )
       }
 
-      field.portWidth = buildPortWidth(field.portWidthSpec, {
-        reg,
-        field,
-        parameters,
-      })
-
       for (let bit = field.lsb; bit <= field.msb; bit += 1) {
         if (usedBits.has(bit)) {
           throw new Error(`${reg.name}: overlapping field bit ${bit}`)
@@ -539,12 +545,12 @@ const renderParameterDecls = (parameters) =>
 /** W1C/W0C sticky bits: hardware sets, the host clears by writing 1 (or 0). */
 const renderStickyBlock = (lines, reg, field) => {
   const sig = field.sig
-  const wdata = `csr_wdata_i${bitSel(field.msb, field.lsb)}`
+  const wdata = `csr_wdata_i${fieldSel(field)}`
   const clrExpr = field.access === 'W1C' ? wdata : `~${wdata}`
   const header = [
     '',
     `  // ${reg.name}${reg.array ? '[]' : ''}.${field.name} (${field.access}): set by hardware strobe ${sig}_set_i;`,
-    `  // the host clears it by writing ${field.access === 'W1C' ? '1' : '0'} to ${reg.name}${bitSel(field.msb, field.lsb)}.`,
+    `  // the host clears it by writing ${field.access === 'W1C' ? '1' : '0'} to ${reg.name}${fieldSel(field)}.`,
   ]
 
   if (reg.array) {
@@ -557,7 +563,7 @@ const renderStickyBlock = (lines, reg, field) => {
       '  always @(posedge clk_i or negedge rstn_i) begin',
       '    if (!rstn_i) begin',
       `      ${arrayLoopHeader(reg, { fromZero: true })} begin`,
-      `        ${element} <= ${resetLiteral(field.width, field.reset)};`,
+      `        ${element} <= ${fieldReset(field)};`,
       '      end',
       '    end else begin',
       '      // Clear before set so an event coincident with a host clear is not lost.',
@@ -576,12 +582,12 @@ const renderStickyBlock = (lines, reg, field) => {
 
   lines.push(
     ...header,
-    `  wire ${widthDecl(field.width)}${sig}_clr_w = (csr_wr_en_i && csr_addr_i == ${reg.constName}_ADDR) ?`,
-    `      ${clrExpr} : ${zeroLiteral(field.width)};`,
+    `  wire ${fieldWidthDecl(field)}${sig}_clr_w = (csr_wr_en_i && csr_addr_i == ${reg.constName}_ADDR) ?`,
+    `      ${clrExpr} : ${fieldZero(field)};`,
     '',
     '  always @(posedge clk_i or negedge rstn_i) begin',
     '    if (!rstn_i) begin',
-    `      ${sig}_o <= ${resetLiteral(field.width, field.reset)};`,
+    `      ${sig}_o <= ${fieldReset(field)};`,
     '    end else begin',
     '      // Clear before set so an event coincident with a host clear is not lost.',
     `      ${sig}_o <= (${sig}_o & ~${sig}_clr_w) | ${sig}_set_i;`,
@@ -595,7 +601,7 @@ const renderSelfClearingBlock = (lines, reg, field) => {
   const sig = field.sig
   const cnt = `${sig}_hold_cnt`
   const holdConst = `${sanitizeConst(sig)}_HOLD_CYCLES`
-  const wdata = `csr_wdata_i${bitSel(field.msb, field.lsb)}`
+  const wdata = `csr_wdata_i${fieldSel(field)}`
   const cntWidth = HOLD_COUNTER_WIDTH
   const namePad = Math.max(`${sig}_o`.length, cnt.length) + 1
 
@@ -614,7 +620,7 @@ const renderSelfClearingBlock = (lines, reg, field) => {
       '  always @(posedge clk_i or negedge rstn_i) begin',
       '    if (!rstn_i) begin',
       `      ${arrayLoopHeader(reg, { fromZero: true })} begin`,
-      `        ${element} <= ${zeroLiteral(field.width)};`,
+      `        ${element} <= ${fieldZero(field)};`,
       `        ${counter} <= ${resetLiteral(cntWidth, 0)};`,
       '      end',
       '    end else begin',
@@ -625,7 +631,7 @@ const renderSelfClearingBlock = (lines, reg, field) => {
       `          ${counter} <= ${holdConst};`,
       `        end else if (${counter} != ${resetLiteral(cntWidth, 0)}) begin`,
       `          ${counter} <= ${counter} - ${resetLiteral(cntWidth, 1)};`,
-      `          if (${counter} == ${resetLiteral(cntWidth, 1)}) ${element} <= ${zeroLiteral(field.width)};`,
+      `          if (${counter} == ${resetLiteral(cntWidth, 1)}) ${element} <= ${fieldZero(field)};`,
       '        end',
       '      end',
       '    end',
@@ -646,14 +652,14 @@ const renderSelfClearingBlock = (lines, reg, field) => {
     '',
     '  always @(posedge clk_i or negedge rstn_i) begin',
     '    if (!rstn_i) begin',
-    `      ${pad(`${sig}_o`, namePad)}<= ${zeroLiteral(field.width)};`,
+    `      ${pad(`${sig}_o`, namePad)}<= ${fieldZero(field)};`,
     `      ${pad(cnt, namePad)}<= ${resetLiteral(cntWidth, 0)};`,
     `    end else if (${sig}_set_w) begin`,
     `      ${pad(`${sig}_o`, namePad)}<= ${wdata};`,
     `      ${pad(cnt, namePad)}<= ${holdConst};`,
     `    end else if (${cnt} != ${resetLiteral(cntWidth, 0)}) begin`,
     `      ${pad(cnt, namePad)}<= ${cnt} - ${resetLiteral(cntWidth, 1)};`,
-    `      if (${cnt} == ${resetLiteral(cntWidth, 1)}) ${sig}_o <= ${zeroLiteral(field.width)};`,
+    `      if (${cnt} == ${resetLiteral(cntWidth, 1)}) ${sig}_o <= ${fieldZero(field)};`,
     '    end',
     '  end'
   )
@@ -765,7 +771,7 @@ const renderCsrBlock = ({
     lines.push('    if (!rstn_i) begin')
 
     for (const { field } of storedFields) {
-      lines.push(`      ${field.sig}_o <= ${resetLiteral(field.width, field.reset)};`)
+      lines.push(`      ${field.sig}_o <= ${fieldReset(field)};`)
     }
 
     for (const reg of storedArrayRegs) {
@@ -774,7 +780,7 @@ const renderCsrBlock = ({
       lines.push(`      ${arrayLoopHeader(reg, { fromZero: true })} begin`)
       for (const field of reg.fields.filter((entry) => isStored(entry.access))) {
         lines.push(
-          `        ${field.sig}_o[${ARRAY_INDEX}] <= ${resetLiteral(field.width, field.reset)};`
+          `        ${field.sig}_o[${ARRAY_INDEX}] <= ${fieldReset(field)};`
         )
       }
       lines.push('      end')
@@ -790,14 +796,14 @@ const renderCsrBlock = ({
       lines.push('      // Write-1 pulses are single cycle: default them low every clock.')
 
       for (const { field } of pulseFields) {
-        lines.push(`      ${field.sig}_o <= ${zeroLiteral(field.width)};`)
+        lines.push(`      ${field.sig}_o <= ${fieldZero(field)};`)
       }
 
       for (const reg of pulseArrayRegs) {
         lines.push(`      ${arrayLoopHeader(reg, { fromZero: true })} begin`)
         for (const field of reg.fields.filter((entry) => entry.access === 'W1P')) {
           lines.push(
-            `        ${field.sig}_o[${ARRAY_INDEX}] <= ${zeroLiteral(field.width)};`
+            `        ${field.sig}_o[${ARRAY_INDEX}] <= ${fieldZero(field)};`
           )
         }
         lines.push('      end')
@@ -816,7 +822,7 @@ const renderCsrBlock = ({
       )
       for (const field of reg.fields.filter((entry) => isStored(entry.access))) {
         lines.push(
-          `            ${field.sig}_o[${ARRAY_INDEX}] <= csr_wdata_i${bitSel(field.msb, field.lsb)};`
+          `            ${field.sig}_o[${ARRAY_INDEX}] <= csr_wdata_i${fieldSel(field)};`
         )
       }
       lines.push('          end', '        end', '')
@@ -833,7 +839,7 @@ const renderCsrBlock = ({
       lines.push(`          ${reg.constName}_ADDR: begin`)
       for (const field of written) {
         lines.push(
-          `            ${field.sig}_o <= csr_wdata_i${bitSel(field.msb, field.lsb)};`
+          `            ${field.sig}_o <= csr_wdata_i${fieldSel(field)};`
         )
       }
       lines.push('          end')
@@ -868,21 +874,8 @@ const renderCsrBlock = ({
 
     lines.push(`        ${reg.constName}_ADDR: begin`)
     for (const field of readable) {
-      if (field.portWidth) {
-        // Vector port: copy as many bits as both the port and the field have.
-        const bit =
-          field.lsb === 0 ? ARRAY_INDEX : `${field.lsb} + ${ARRAY_INDEX}`
-
-        lines.push(
-          `          for (int ${ARRAY_INDEX} = 0; ${ARRAY_INDEX} < ${field.portWidth.expr} && ${ARRAY_INDEX} < ${field.width}; ${ARRAY_INDEX}++) begin`,
-          `            csr_rdata_o[${bit}] = ${readbackSignal(field)}[${ARRAY_INDEX}];`,
-          '          end'
-        )
-        continue
-      }
-
       lines.push(
-        `          csr_rdata_o${bitSel(field.msb, field.lsb)} = ${readbackSignal(field)};`
+        `          csr_rdata_o${fieldSel(field)} = ${readbackSignal(field)};`
       )
     }
     lines.push('        end')
@@ -910,7 +903,7 @@ const renderCsrBlock = ({
     )
     for (const field of readable) {
       lines.push(
-        `          csr_rdata_o${bitSel(field.msb, field.lsb)} = ${readbackSignal(field)}[${ARRAY_INDEX}];`
+        `          csr_rdata_o${fieldSel(field)} = ${readbackSignal(field)}[${ARRAY_INDEX}];`
       )
     }
     lines.push('        end', '      end')
