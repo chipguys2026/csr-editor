@@ -42,6 +42,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import { hex } from '@/lib/number-formating'
 
 const handleKeyDown = (e) => {
@@ -191,7 +193,7 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
       </SelectTrigger>
 
       <SelectContent>
-        {['RW', 'RO', 'WO', 'W1C', 'W0C'].map((t) => (
+        {['RW', 'RO', 'WO', 'W1C', 'W1S', 'W1P', 'W1SC', 'W0C'].map((t) => (
           <SelectItem
             key={t}
             value={t}
@@ -524,9 +526,30 @@ export const RegisterDetail = () => {
           )}
         </div>
 
-        <Badge className='font-mono'>
-          0x{addr.toString(16).padStart(4, '0')}
-        </Badge>
+        <div className='flex items-center gap-4'>
+          <Badge className='font-mono'>
+            0x{addr.toString(16).padStart(4, '0')}
+          </Badge>
+
+          {(isEditing || watch('writeStrobe')) && (
+            <div className='flex items-center gap-2'>
+              <Switch
+                id='write-strobe'
+                checked={Boolean(watch('writeStrobe'))}
+                disabled={!isEditing}
+                onCheckedChange={(checked) =>
+                  setValue('writeStrobe', checked, { shouldDirty: true })
+                }
+              />
+              <Label
+                htmlFor='write-strobe'
+                className='text-muted-foreground text-sm font-normal'
+              >
+                Write strobe
+              </Label>
+            </div>
+          )}
+        </div>
 
         {isEditing ? (
           <textarea
