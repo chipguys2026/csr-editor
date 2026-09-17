@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { FoldVertical, Plus, Trash2, UnfoldVertical } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -45,6 +45,9 @@ export const RegisterItem = ({
   issues,
   hoveredReg,
   onHoverReg,
+  isSelected,
+  onSelect: onSelectRow,
+  onInsertBefore,
 }) => {
   const reg = useRegisterStore((s) => s.registers[addr])
 
@@ -72,7 +75,9 @@ export const RegisterItem = ({
   const inHoveredBank =
     hoveredReg != null && (claims ?? []).some((entry) => entry.regAddr === hoveredReg)
 
-  const onSelect = () => setCurrentRegister(instance ? instance.regAddr : addr)
+  const owner = instance ? instance.regAddr : addr
+  const onSelect = (event) =>
+    onSelectRow ? onSelectRow(owner, event) : setCurrentRegister(owner)
 
   return (
     <div
@@ -102,6 +107,7 @@ export const RegisterItem = ({
         className={cn(
           'flex h-full grow cursor-pointer items-center gap-2 border p-2',
           inHoveredBank && 'border-foreground/40 bg-muted-foreground/25',
+          isSelected && 'border-foreground bg-muted-foreground/25',
           (conflict || issues?.length) && 'border-destructive text-destructive',
           instance && 'text-muted-foreground border-dashed'
         )}
@@ -128,6 +134,20 @@ export const RegisterItem = ({
           </span>
         )}
 
+        {reg && onInsertBefore && (
+          <button
+            type='button'
+            title={`Insert a free word here, pushing ${reg.name} and everything above it up`}
+            onClick={(event) => {
+              event.stopPropagation()
+              onInsertBefore()
+            }}
+            className={cn(rowActionClass, 'text-muted-foreground')}
+          >
+            <UnfoldVertical className='h-3.5 w-3.5' />
+          </button>
+        )}
+
         {reg && (
           <button
             type='button'
@@ -136,7 +156,7 @@ export const RegisterItem = ({
               event.stopPropagation()
               deleteRegister(addr)
             }}
-            className={cn(rowActionClass, 'text-destructive')}
+            className={cn(rowActionClass, 'ml-0 text-destructive')}
           >
             <Trash2 className='h-3.5 w-3.5' />
           </button>
@@ -147,8 +167,11 @@ export const RegisterItem = ({
 }
 
 /** A run of unused addresses, collapsed to one row and open as a drop target. */
-const GapRow = ({ start, end, step, addrWidth, onCreate }) => {
+const GapRow = ({ start, end, step, addrWidth, onCreate, onClose, onResize, onClear }) => {
   const words = (end - start) / step + 1
+  const [draft, setDraft] = useState(String(words))
+
+  useEffect(() => setDraft(String(words)), [words])
 
   const { setNodeRef } = useSortable({
     id: start,
@@ -156,21 +179,51 @@ const GapRow = ({ start, end, step, addrWidth, onCreate }) => {
     disabled: { draggable: true, droppable: false },
   })
 
+  const commit = () => {
+    const next = Number(draft)
+
+    if (!Number.isInteger(next) || next < 0) {
+      setDraft(String(words))
+      return
+    }
+
+    if (next !== words) onResize(next)
+  }
+
   return (
     <div
       ref={setNodeRef}
       className='group grid h-9 grid-cols-[auto_1fr] items-center gap-2'
+      onClick={onClear}
     >
       <span className='text-muted-foreground font-mono text-sm whitespace-nowrap opacity-50'>
         {hex(start, addrWidth)}
       </span>
 
       <div className='text-muted-foreground flex h-full grow items-center gap-2 border border-dashed p-2'>
-        <span className='truncate'>
-          {words === 1
-            ? 'Reserved'
-            : `Reserved · ${words.toLocaleString()} words to ${hex(end, addrWidth)}`}
-        </span>
+        {/* The size is the control: type a bigger number and everything above
+            moves up to make room, which is how a large gap gets opened. */}
+        {onResize ? (
+          <span className='flex items-center gap-1 truncate'>
+            Reserved ·
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onBlur={commit}
+              onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()}
+              onClick={(event) => event.stopPropagation()}
+              title='Words reserved here; changing this moves everything above'
+              className='border-input h-6 w-14 rounded-md border bg-transparent px-1 text-center font-mono text-xs'
+            />
+            words
+          </span>
+        ) : (
+          <span className='truncate'>
+            {words === 1
+              ? 'Reserved'
+              : `Reserved · ${words.toLocaleString()} words to ${hex(end, addrWidth)}`}
+          </span>
+        )}
 
         <button
           type='button'
@@ -180,6 +233,17 @@ const GapRow = ({ start, end, step, addrWidth, onCreate }) => {
         >
           <Plus className='h-3.5 w-3.5' />
         </button>
+
+        {onClose && (
+          <button
+            type='button'
+            title={`Close this gap, pulling the registers above it down by ${words} word(s)`}
+            onClick={onClose}
+            className={cn(rowActionClass, 'ml-0')}
+          >
+            <FoldVertical className='h-3.5 w-3.5' />
+          </button>
+        )}
       </div>
     </div>
   )
@@ -203,6 +267,10 @@ export const RegisterMap = () => {
   const [activeId, setActiveId] = useState(null)
   const [hoveredReg, setHoveredReg] = useState(null)
   const [newAddr, setNewAddr] = useState('')
+  // Addresses picked out for a bulk move, plus the anchor a shift-click
+  // extends the range from.
+  const [selected, setSelected] = useState(() => new Set())
+  const [anchor, setAnchor] = useState(null)
 
   const { addrWidth, dataWidth, parameters } = useParamStore()
   const moveInsert = useRegisterStore((s) => s.moveInsert)
@@ -212,7 +280,9 @@ export const RegisterMap = () => {
   )
 
   const createRegister = useRegisterStore((s) => s.createRegister)
+  const setRegisters = useRegisterStore((s) => s.setRegisters)
   const setCurrentRegister = useCurrentRegisterStore((s) => s.setCurrentRegister)
+  const currentRegister = useCurrentRegisterStore((s) => s.currentRegister)
 
   const addressMap = buildAddressMap(registers, parameters)
 
@@ -232,10 +302,122 @@ export const RegisterMap = () => {
 
   const rows = buildRows(addressMap, step, maxAddr)
 
+  const selectRow = (addr, event) => {
+    const addresses = rows
+      .filter((row) => row.type === 'register' && registers[row.addr])
+      .map((row) => row.addr)
+
+    if (event.shiftKey && anchor != null) {
+      const from = addresses.indexOf(anchor)
+      const to = addresses.indexOf(addr)
+
+      if (from >= 0 && to >= 0) {
+        const [low, high] = from < to ? [from, to] : [to, from]
+        setSelected(new Set(addresses.slice(low, high + 1)))
+        return
+      }
+    }
+
+    if (event.metaKey || event.ctrlKey) {
+      const next = new Set(selected)
+      next.has(addr) ? next.delete(addr) : next.add(addr)
+      setSelected(next)
+      setAnchor(addr)
+      return
+    }
+
+    setSelected(new Set([addr]))
+    setAnchor(addr)
+    setCurrentRegister(addr)
+  }
+
+  /**
+   * Drop the selected block so the row that was grabbed lands on `targetAddr`.
+   * The block keeps its internal spacing. If it would land on registers that
+   * are not moving, they are pushed up to make room rather than the drop being
+   * refused - the same courtesy a single dragged register already gets.
+   */
+  const dropSelectionAt = (targetAddr, grabbedAddr) => {
+    const block = [...selected].sort((a, b) => a - b)
+    const placed = (addr) => targetAddr + (addr - grabbedAddr)
+    const asIs = (addr) => (selected.has(addr) ? placed(addr) : addr)
+
+    let addressOf = asIs
+    let done = `Moved ${block.length} register(s)`
+
+    if (tryRelocate(asIs).error) {
+      const span = block[block.length - 1] - block[0] + step
+      const landing = placed(block[0])
+
+      addressOf = (addr) =>
+        selected.has(addr) ? placed(addr) : addr >= landing ? addr + span : addr
+      done = `Moved ${block.length} register(s), pushing the rest up`
+    }
+
+    if (relocate(addressOf, done)) {
+      setSelected(new Set(block.map(placed)))
+      setAnchor(anchor == null ? null : addressOf(anchor))
+    }
+  }
+
   const createAt = (addr) => {
     createRegister(addr)
     setCurrentRegister(addr)
   }
+
+  /**
+   * Slide every register at or above `fromAddr` by `delta` bytes, which is how
+   * a gap is closed (negative) or opened (positive). Refused when it would run
+   * off either end of the space or drop a register onto another - an array
+   * below the gap can reach across it.
+   */
+  /** The relocated map, or a reason it cannot be applied. */
+  const tryRelocate = (addressOf) => {
+    const moved = Object.entries(registers).map(([addrText, reg]) => [
+      addressOf(Number(addrText)),
+      reg,
+    ])
+
+    const addresses = moved.map(([addr]) => addr)
+    if (addresses.some((addr) => addr < 0 || addr > maxAddr)) {
+      return { error: 'That would move a register outside the address space' }
+    }
+
+    // Checked on the list, not the map: two registers landing on one address
+    // would otherwise collapse into a single key and quietly lose one.
+    if (new Set(addresses).size !== addresses.length) {
+      return { error: 'That would move a register onto another one' }
+    }
+
+    const next = Object.fromEntries(moved)
+
+    if ([...buildAddressMap(next, parameters).values()].some(hasConflict)) {
+      return { error: 'That would overlap another register' }
+    }
+
+    return { next }
+  }
+
+  const relocate = (addressOf, done) => {
+    const { next, error } = tryRelocate(addressOf)
+
+    if (error) {
+      toast.error(error)
+      return false
+    }
+
+    setRegisters(next)
+
+    if (currentRegister != null) {
+      setCurrentRegister(addressOf(currentRegister))
+    }
+
+    toast.success(done)
+    return true
+  }
+
+  const shiftFrom = (fromAddr, delta, done) =>
+    relocate((addr) => (addr >= fromAddr ? addr + delta : addr), done)
 
   // Gaps collapse to a single row, so typing an address is the only way to
   // land somewhere specific inside a large one.
@@ -282,9 +464,17 @@ export const RegisterMap = () => {
       onDragStart={(e) => setActiveId(e.active.id)}
       onDragEnd={(e) => {
         const { active, over } = e
-        if (over) {
-          moveInsert(active.id, over.id, step, maxAddr)
+
+        if (over && over.id !== active.id) {
+          // Dragging any row of a multi-selection carries the whole block by
+          // the same delta; a lone row keeps the insert-and-shift behaviour.
+          if (selected.size > 1 && selected.has(active.id)) {
+            dropSelectionAt(over.id, active.id)
+          } else {
+            moveInsert(active.id, over.id, step, maxAddr)
+          }
         }
+
         setActiveId(null)
       }}
     >
@@ -309,7 +499,9 @@ export const RegisterMap = () => {
         </Button>
 
         <span className='text-muted-foreground ml-auto text-xs'>
-          {Object.keys(registers).length} registers
+          {selected.size > 1
+            ? `${selected.size} selected · drag to move together`
+            : `${Object.keys(registers).length} registers`}
         </span>
       </div>
 
@@ -344,6 +536,34 @@ export const RegisterMap = () => {
                       step={step}
                       addrWidth={addrWidth}
                       onCreate={() => createAt(row.start)}
+                      onClear={() => {
+                        setSelected(new Set())
+                        setAnchor(null)
+                      }}
+                      onClose={
+                        // The final gap runs to the end of the space: there is
+                        // nothing above it to pull down.
+                        virtualRow.index < rows.length - 1
+                          ? () =>
+                              shiftFrom(
+                                row.end + step,
+                                -(row.end - row.start + step),
+                                `Closed the gap at ${hex(row.start, addrWidth)}`
+                              )
+                          : undefined
+                      }
+                      onResize={
+                        virtualRow.index < rows.length - 1
+                          ? (words) => {
+                              const was = (row.end - row.start) / step + 1
+                              shiftFrom(
+                                row.end + step,
+                                (words - was) * step,
+                                `Reserved ${words} word(s) at ${hex(row.start, addrWidth)}`
+                              )
+                            }
+                          : undefined
+                      }
                     />
                   ) : (
                     <RegisterItem
@@ -355,6 +575,15 @@ export const RegisterMap = () => {
                       issues={issuesByAddr.get(row.addr)}
                       hoveredReg={hoveredReg}
                       onHoverReg={setHoveredReg}
+                      isSelected={selected.has(row.addr)}
+                      onSelect={selectRow}
+                      onInsertBefore={() =>
+                        shiftFrom(
+                          row.addr,
+                          step,
+                          `Inserted a free word at ${hex(row.addr, addrWidth)}`
+                        )
+                      }
                       isDragging={row.addr === activeId}
                     />
                   )}

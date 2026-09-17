@@ -7,21 +7,25 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const ExcelPage = () => {
-  const { moduleName, dataWidth, addrWidth, interface: csrInterface } =
+  const { moduleName, dataWidth, addrWidth, interface: csrInterface, parameters } =
     useParamStore()
   const registers = useRegisterStore((state) => state.registers)
   const [activeTab, setActiveTab] = useState('registers')
 
+  // parameters go along too: an array's count resolves through them, so the
+  // flattened sheet cannot expand a bank without them.
+  const params = useMemo(
+    () => ({ moduleName, dataWidth, addrWidth, interface: csrInterface, parameters }),
+    [moduleName, dataWidth, addrWidth, csrInterface, parameters]
+  )
+
   const excelData = useMemo(
-    () => generateExcelData(
-      { moduleName, dataWidth, addrWidth, interface: csrInterface },
-      registers
-    ),
-    [moduleName, dataWidth, addrWidth, csrInterface, registers]
+    () => generateExcelData(params, registers),
+    [params, registers]
   )
 
   const handleDownload = () => {
-    exportToExcel(moduleName, { moduleName, dataWidth, addrWidth, interface: csrInterface }, registers)
+    exportToExcel(moduleName, params, registers)
   }
 
   return (
@@ -31,7 +35,7 @@ const ExcelPage = () => {
         <div className='border-b px-4 py-3'>
           <p className='text-sm font-medium'>Excel Preview</p>
           <p className='text-muted-foreground text-xs'>
-            2 sheet(s)
+            3 sheet(s)
           </p>
         </div>
 
@@ -59,6 +63,18 @@ const ExcelPage = () => {
             onClick={() => setActiveTab('registers')}
           >
             Registers
+          </button>
+          <button
+            type='button'
+            className={cn(
+              'flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors',
+              activeTab === 'flat registers'
+                ? 'bg-accent text-accent-foreground'
+                : 'hover:bg-accent/60'
+            )}
+            onClick={() => setActiveTab('flat registers')}
+          >
+            Flat Registers
           </button>
         </div>
       </aside>
@@ -143,6 +159,50 @@ const ExcelPage = () => {
                         <td className='px-3 py-2 border text-center'>{row.type}</td>
                         <td className='px-3 py-2 border text-right font-mono'>{row.resetValue}</td>
                         <td className={`px-3 py-2 border ${row.isRegisterRow ? 'italic' : ''}`}>
+                          {row.description}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'flat registers' && (
+            <div className='overflow-hidden rounded-lg border'>
+              <div className='overflow-x-auto'>
+                <table className='w-full text-sm'>
+                  <thead>
+                    <tr className='bg-blue-600 text-white'>
+                      <th className='min-w-[100px] border px-3 py-2 text-left'>Address</th>
+                      <th className='min-w-[180px] border px-3 py-2 text-left'>Register Name</th>
+                      <th className='min-w-[140px] border px-3 py-2 text-left'>Field Name</th>
+                      <th className='min-w-[100px] border px-3 py-2 text-left'>Bit Range</th>
+                      <th className='min-w-[60px] border px-3 py-2 text-right'>Width</th>
+                      <th className='min-w-[60px] border px-3 py-2 text-center'>Type</th>
+                      <th className='min-w-[80px] border px-3 py-2 text-right'>Reset Value</th>
+                      <th className='min-w-[300px] border px-3 py-2 text-left'>Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {excelData.flat.map((row, idx) => (
+                      <tr
+                        key={idx}
+                        className={row.isRegisterRow ? 'bg-gray-200 dark:bg-gray-700' : ''}
+                      >
+                        <td className={`border px-3 py-2 font-mono ${row.isRegisterRow ? 'font-bold' : ''}`}>
+                          {row.address}
+                        </td>
+                        <td className={`border px-3 py-2 ${row.isRegisterRow ? 'font-bold' : ''}`}>
+                          {row.registerName}
+                        </td>
+                        <td className='border px-3 py-2'>{row.fieldName}</td>
+                        <td className='border px-3 py-2 font-mono'>{row.bitRange}</td>
+                        <td className='border px-3 py-2 text-right'>{row.width}</td>
+                        <td className='border px-3 py-2 text-center'>{row.type}</td>
+                        <td className='border px-3 py-2 text-right font-mono'>{row.resetValue}</td>
+                        <td className={`border px-3 py-2 ${row.isRegisterRow ? 'italic' : ''}`}>
                           {row.description}
                         </td>
                       </tr>

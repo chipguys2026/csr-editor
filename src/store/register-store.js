@@ -55,6 +55,19 @@ export const useRegisterStore = create((set, get) => ({
       return { registers }
     }),
 
+  /** Move a register to a free address, keeping everything else in place. */
+  moveRegister: (fromAddr, toAddr) =>
+    set((state) => {
+      const moving = state.registers[fromAddr]
+      if (!moving || fromAddr === toAddr || state.registers[toAddr]) return state
+
+      const registers = { ...state.registers }
+      delete registers[fromAddr]
+      registers[toAddr] = moving
+
+      return { registers }
+    }),
+
   /** Place a register at an address, creating or replacing it (used by undo). */
   setRegister: (addr, register) =>
     set((state) => ({

@@ -587,6 +587,8 @@ export const RegisterDetail = () => {
   // Field being dragged, and the row it is currently over.
   const [dragField, setDragField] = useState(null)
   const [dropField, setDropField] = useState(null)
+  // Set while the address badge is being edited.
+  const [addressDraft, setAddressDraft] = useState(null)
 
   const {
     register: rf,
@@ -762,6 +764,45 @@ export const RegisterDetail = () => {
    * Drops are addressed by bit, so a reserved gap is a valid destination: the
    * field takes the position in the sequence that the gap occupies.
    */
+  const commitAddress = () => {
+    const raw = addressDraft.trim().toLowerCase()
+    const next = /^0x[0-9a-f]+$/.test(raw)
+      ? parseInt(raw.slice(2), 16)
+      : /^\d+$/.test(raw)
+        ? Number(raw)
+        : NaN
+
+    setAddressDraft(null)
+    if (Number.isNaN(next) || next === addr) return
+
+    if (next < 0 || next >= 2 ** addrWidth) {
+      toast.error(`Address must fit in ${addrWidth} bits`)
+      return
+    }
+
+    if (next % step !== 0) {
+      toast.error(`Address must be ${step}-byte aligned`)
+      return
+    }
+
+    const { registers, moveRegister } = useRegisterStore.getState()
+    const taken = buildAddressMap(
+      Object.fromEntries(
+        Object.entries(registers).filter(([key]) => Number(key) !== addr)
+      ),
+      parameters ?? []
+    )
+
+    if (taken.has(next)) {
+      toast.error(`${hex(next, addrWidth)} is taken by ${taken.get(next)[0].name}`)
+      return
+    }
+
+    moveRegister(addr, next)
+    setCurrentRegister(next)
+    toast.success(`Moved ${registerData.name} to ${hex(next, addrWidth)}`)
+  }
+
   const moveFieldToBit = (fromLsb, targetBit) => {
     const from = fields.findIndex((field) => field.bitRange.lsb === fromLsb)
     if (from < 0) return
@@ -879,9 +920,29 @@ export const RegisterDetail = () => {
         {/* Address row: the array controls live here rather than in a block of
             their own, so an ordinary register costs one small switch. */}
         <div className='flex flex-wrap items-center gap-2'>
-          <Badge className='font-mono'>
-            0x{addr.toString(16).padStart(4, '0')}
-          </Badge>
+          {/* Editing the address moves this register on its own, which is how
+              a gap of any size gets opened without shifting the whole map. */}
+          {addressDraft == null ? (
+            <Badge
+              className='cursor-pointer font-mono'
+              title='Click to change this address'
+              onClick={() => setAddressDraft(hex(addr, addrWidth))}
+            >
+              {hex(addr, addrWidth)}
+            </Badge>
+          ) : (
+            <input
+              autoFocus
+              value={addressDraft}
+              onChange={(event) => setAddressDraft(event.target.value)}
+              onBlur={commitAddress}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+                if (event.key === 'Escape') setAddressDraft(null)
+              }}
+              className='border-input h-6 w-24 rounded-md border bg-transparent px-2 font-mono text-sm'
+            />
+          )}
 
           {registerArray && !isEditing && (
             <>
