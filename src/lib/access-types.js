@@ -5,6 +5,7 @@
  *   out     - a driven output register
  *   in      - a sampled hardware input
  *   out+set - a driven output register plus a hardware set strobe input
+ *   out+clr - a driven output register plus a hardware clear request input
  */
 export const accessTypes = [
   {
@@ -30,6 +31,12 @@ export const accessTypes = [
     port: 'out+set',
     readable: true,
     description: 'Sticky status set by hardware; host writes 1 to clear.',
+  },
+  {
+    value: 'W1S',
+    port: 'out+clr',
+    readable: true,
+    description: 'Sticky control set by the host writing 1; hardware clears.',
   },
   {
     value: 'W0C',
@@ -67,6 +74,7 @@ export const accessColorMap = {
   RO: 'fill-yellow-200 dark:fill-yellow-400',
   WO: 'fill-green-200 dark:fill-green-400',
   W1C: 'fill-pink-200 dark:fill-pink-400',
+  W1S: 'fill-teal-200 dark:fill-teal-400',
   W0C: 'fill-rose-200 dark:fill-rose-400',
   W1P: 'fill-purple-200 dark:fill-purple-400',
   W1SC: 'fill-orange-200 dark:fill-orange-400',

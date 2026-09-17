@@ -45,6 +45,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Label } from '@/components/ui/label'
 import { hex } from '@/lib/number-formating'
 
 const handleKeyDown = (e) => {
@@ -977,6 +978,25 @@ export const RegisterDetail = () => {
               step={step}
               onChange={(next) => setValue('array', next, { shouldDirty: true })}
             />
+          )}
+
+          {(isEditing || watch('writeStrobe')) && (
+            <div className='flex items-center gap-2'>
+              <Switch
+                id='write-strobe'
+                checked={Boolean(watch('writeStrobe'))}
+                disabled={!isEditing}
+                onCheckedChange={(checked) =>
+                  setValue('writeStrobe', checked, { shouldDirty: true })
+                }
+              />
+              <Label
+                htmlFor='write-strobe'
+                className='text-muted-foreground text-sm font-normal'
+              >
+                Write strobe
+              </Label>
+            </div>
           )}
         </div>
 

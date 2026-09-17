@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 
 import {
   Field,
+  FieldDescription,
   FieldLabel,
   FieldError,
   FieldGroup,
@@ -26,6 +27,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
+import { Switch } from '@/components/ui/switch'
 import { useParamStore } from '@/store/params-store'
 
 const sameParams = (a, b) =>
@@ -33,6 +35,7 @@ const sameParams = (a, b) =>
   a.addrWidth === b.addrWidth &&
   a.interface === b.interface &&
   a.moduleName === b.moduleName &&
+  Boolean(a.registeredReadback) === Boolean(b.registeredReadback) &&
   JSON.stringify(a.parameters ?? []) === JSON.stringify(b.parameters ?? [])
 
 export const ParamPanel = () => {
@@ -42,6 +45,7 @@ export const ParamPanel = () => {
     interface: csrInterface,
     moduleName,
     parameters,
+    registeredReadback,
     setParams,
   } = useParamStore()
 
@@ -54,6 +58,7 @@ export const ParamPanel = () => {
       interface: csrInterface || 'Native',
       moduleName: moduleName || 'CSR',
       parameters: parameters ?? [],
+      registeredReadback: Boolean(registeredReadback),
     },
   })
 
@@ -64,6 +69,7 @@ export const ParamPanel = () => {
       interface: csrInterface,
       moduleName,
       parameters: parameters ?? [],
+      registeredReadback: Boolean(registeredReadback),
     }
 
     if (sameParams(form.getValues(), nextValues)) {
@@ -71,7 +77,15 @@ export const ParamPanel = () => {
     }
 
     form.reset(nextValues)
-  }, [form, dataWidth, addrWidth, csrInterface, moduleName, parameters])
+  }, [
+    form,
+    dataWidth,
+    addrWidth,
+    csrInterface,
+    moduleName,
+    parameters,
+    registeredReadback,
+  ])
 
   const commitParamChange = (name, value) => {
     form.setValue(name, value, {
@@ -95,6 +109,7 @@ export const ParamPanel = () => {
         interface: csrInterface,
         moduleName,
         parameters,
+        registeredReadback,
       })
     ) {
       return
@@ -265,6 +280,32 @@ export const ParamPanel = () => {
             </div>
           )}
         </Field>
+
+        {/* Registered readback */}
+        <Controller
+          name='registeredReadback'
+          control={form.control}
+          render={({ field }) => (
+            <Field>
+              <div className='flex items-center gap-2'>
+                <Switch
+                  id='registeredReadback'
+                  checked={Boolean(field.value)}
+                  onCheckedChange={(checked) =>
+                    commitParamChange('registeredReadback', checked)
+                  }
+                />
+                <FieldLabel htmlFor='registeredReadback'>
+                  Registered readback
+                </FieldLabel>
+              </div>
+              <FieldDescription>
+                Registers the readback mux output. Adds one cycle of read
+                latency, absorbed by the bridge.
+              </FieldDescription>
+            </Field>
+          )}
+        />
       </FieldGroup>
     </div>
   )

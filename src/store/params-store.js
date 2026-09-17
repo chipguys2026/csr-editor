@@ -6,6 +6,7 @@ export const useParamStore = create((set) => ({
   interface: 'Native',
   moduleName: 'CSR',
   parameters: [],
+  registeredReadback: false,
 
   setParams: (params) => set(params),
 }))
