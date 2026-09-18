@@ -69,11 +69,6 @@ const fieldReset = (field) =>
     ? `${field.widthExpr}'(${field.reset})`
     : resetLiteral(field.width, field.reset)
 const arrayDimSuffix = (port) => (port.arrayDim ? ` [${port.arrayDim}]` : '')
-/** A named value sized to its field, symbolic when the width is a parameter. */
-const enumLiteral = (field, value) =>
-  field.widthExpr
-    ? `${field.widthExpr}'(${value})`
-    : resetLiteral(field.width, value)
 
 /**
  * The bits of a field a write is allowed to touch, from the byte enables. A
@@ -1055,27 +1050,6 @@ const renderCsrBlock = ({
     lines.push(`  localparam [ADDR_WIDTH-1:0] ${reg.constName}_ADDR = ADDR_WIDTH'(${reg.addr});`)
   }
 
-  for (const reg of regs) {
-    const named = reg.fields.filter((field) => field.enumValues.length > 0)
-
-    for (const field of named) {
-      const pad =
-        Math.max(...field.enumValues.map((entry) => entry.constName.length)) +
-        reg.constName.length +
-        sanitizeConst(field.name).length +
-        2
-
-      lines.push('', `  // ${reg.name}.${field.name} named values`)
-
-      for (const entry of field.enumValues) {
-        const name = `${reg.constName}_${sanitizeConst(field.name)}_${entry.constName}`
-        lines.push(
-          `  localparam ${fieldWidthDecl(field)}${name.padEnd(pad)} = ${enumLiteral(field, entry.value)};`
-        )
-      }
-    }
-  }
-
   if (registeredReadback) {
     lines.push('', `  reg [DATA_WIDTH-1:0] ${readTarget};`)
   }
@@ -1351,6 +1325,50 @@ const renderCsrBlock = ({
 
   return lines.join('\n')
 }
+
+/**
+ * The named field values, as a package rather than constants inside the CSR
+ * block. The block only stores a field; whatever decides or decodes its value
+ * is the logic around it, which cannot reach a localparam declared in here.
+ */
+const renderEnumPackage = ({ moduleName, regs }) => {
+  const lines = [
+    `// Named field values from the register map for ${moduleName}.`,
+    '//',
+    '// Import this where a field value is chosen or decoded. The CSR block',
+    '// itself only stores the fields, so it does not import it.',
+    `package ${moduleName}_pkg;`,
+  ]
+
+  for (const reg of regs) {
+    for (const field of reg.fields.filter((entry) => entry.enumValues.length > 0)) {
+      const base = `${reg.constName}_${sanitizeConst(field.name)}`
+      const pad = Math.max(...field.enumValues.map((entry) => entry.constName.length))
+
+      lines.push(
+        '',
+        `  // ${reg.name}.${field.name}${
+          field.widthExpr
+            ? `, ${field.width} bits at the current ${field.widthExpr}`
+            : ''
+        }`
+      )
+
+      for (const entry of field.enumValues) {
+        lines.push(
+          `  localparam ${widthDecl(field.width)}${base}_${entry.constName.padEnd(pad)} = ${resetLiteral(field.width, entry.value)};`
+        )
+      }
+    }
+  }
+
+  lines.push('', 'endpackage', '')
+
+  return lines.join('\n')
+}
+
+const hasEnumValues = (regs) =>
+  regs.some((reg) => reg.fields.some((field) => field.enumValues.length > 0))
 
 const renderAvalonBridge = ({ addrWidth, dataWidth, registeredReadback }) =>
   [
@@ -1766,15 +1784,24 @@ export const generateRtlFiles = (doc) => {
   const bridge = BRIDGE_INFO[model.interface]
   const blockModuleName = bridge ? `${model.moduleName}_csr` : model.moduleName
 
-  const files = [
-    {
-      name: bridge ? `${model.moduleName}_csr.sv` : `${model.moduleName}.sv`,
-      content: renderCsrBlock({
-        ...model,
-        blockModuleName,
-      }),
-    },
-  ]
+  const files = []
+
+  // Before the block, so a compile order taken from this list declares the
+  // package first.
+  if (hasEnumValues(model.regs)) {
+    files.push({
+      name: `${model.moduleName}_pkg.sv`,
+      content: renderEnumPackage(model),
+    })
+  }
+
+  files.push({
+    name: bridge ? `${model.moduleName}_csr.sv` : `${model.moduleName}.sv`,
+    content: renderCsrBlock({
+      ...model,
+      blockModuleName,
+    }),
+  })
 
   if (bridge) {
     files.push(
