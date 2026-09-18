@@ -14,7 +14,7 @@ import {
   resolveFields,
   resolveWidth,
 } from '@/lib/register'
-import { accessTypes } from '@/lib/access-types'
+import { accessTypes, holdCyclesOf } from '@/lib/access-types'
 import { buildAddressMap } from '@/lib/address-map'
 import { deleteRegister } from '@/lib/delete-register'
 import { cn } from '@/lib/utils'
@@ -271,16 +271,37 @@ const FieldBitRange = ({
   )
 }
 
+/**
+ * The access type, plus the hold window when it is one that has one. W1SC is
+ * the only type carrying a setting of its own, so it rides along with the type
+ * rather than costing every row a column.
+ */
 const FieldType = ({ field, isEditing, watch, setValue }) => {
   const path = `fields.${field.trueIndex}.type`
+  const holdPath = `fields.${field.trueIndex}.holdCycles`
   const value = watch(path)
 
   if (!isEditing) {
-    return <Badge variant='outline'>{field.type}</Badge>
+    return (
+      <div className='flex items-center justify-center gap-1'>
+        <Badge variant='outline'>{field.type}</Badge>
+
+        {field.type === 'W1SC' && (
+          <Badge
+            variant='secondary'
+            className='font-mono'
+            title={`Asserted for ${holdCyclesOf(field)} clocks after a write-1`}
+          >
+            {holdCyclesOf(field)}
+          </Badge>
+        )}
+      </div>
+    )
   }
 
   return (
-    <Select
+    <div className='flex items-center gap-1'>
+      <Select
       value={value}
       onValueChange={(v) => setValue(path, v, { shouldDirty: true })}
     >
@@ -304,7 +325,30 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
           </SelectItem>
         ))}
       </SelectContent>
-    </Select>
+      </Select>
+
+      {value === 'W1SC' && (
+        <input
+          type='text'
+          inputMode='numeric'
+          value={watch(holdPath) ?? holdCyclesOf(field)}
+          title='Clocks the output stays asserted before it clears itself'
+          onChange={(event) =>
+            setValue(holdPath, event.target.value.replace(/[^0-9]/g, ''), {
+              shouldDirty: true,
+            })
+          }
+          onBlur={(event) => {
+            // An empty or zero window means "just use the default".
+            const next = Number(event.target.value)
+            setValue(holdPath, Number.isInteger(next) && next > 0 ? next : null, {
+              shouldDirty: true,
+            })
+          }}
+          className='border-input h-6 w-12 rounded-md border bg-transparent px-1 text-center font-mono text-xs'
+        />
+      )}
+    </div>
   )
 }
 

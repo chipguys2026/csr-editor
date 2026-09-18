@@ -1,13 +1,13 @@
-import { accessTypeMap, accessTypeValues } from './access-types.js'
+import {
+  accessTypeMap,
+  accessTypeValues,
+  holdCounterWidth,
+  holdCyclesOf,
+} from './access-types.js'
 
 const NATIVE_INTERFACE = 'Native'
 const AVALON_MM_INTERFACE = 'AvalonMM'
 const AXI4_LITE_INTERFACE = 'AXI4Lite'
-
-// Cycles a W1SC field stays asserted before it clears itself, and the width of
-// the counter that times it.
-const HOLD_CYCLES = 15
-const HOLD_COUNTER_WIDTH = 8
 
 const sanitizeName = (value) => {
   let out = value.trim().toLowerCase().replace(/[^a-zA-Z0-9_]/g, '_')
@@ -546,6 +546,12 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
         // An RO field whose value never changes: tied off in the block rather
         // than exposed as an input the caller has to drive.
         constant: Boolean(field?.constant),
+        // Only meaningful for W1SC; validated below. Blank means "default",
+        // which is what a cleared input submits before it has been blurred.
+        holdCycles:
+          field?.holdCycles == null || field.holdCycles === ''
+            ? null
+            : Number(field.holdCycles),
         signalBase: sanitizeName(fieldName),
         ...buildFieldWidth(field?.bitRange, {
           regName: String(register?.name ?? `REG_${addrText}`),
@@ -658,6 +664,20 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
         throw new Error(
           `${reg.name}.${field.name}: constant is only valid on RO fields, not '${field.access}'`
         )
+      }
+
+      if (field.holdCycles != null) {
+        if (field.access !== 'W1SC') {
+          throw new Error(
+            `${reg.name}.${field.name}: holdCycles is only valid on W1SC fields, not '${field.access}'`
+          )
+        }
+
+        if (!Number.isInteger(field.holdCycles) || field.holdCycles < 1) {
+          throw new Error(
+            `${reg.name}.${field.name}: holdCycles must be a positive integer`
+          )
+        }
       }
 
       if (['W1P', 'W1SC'].includes(field.access) && field.reset !== 0) {
@@ -836,13 +856,18 @@ const renderSetBlock = (lines, reg, field) => {
   )
 }
 
-/** W1SC: a host write-1 asserts the output for a hold window, then it clears. */
+/**
+ * W1SC: a host write-1 asserts the output for the field's hold window, then it
+ * clears. The counter is sized to the window rather than fixed, so a one-cycle
+ * pulse costs one flop.
+ */
 const renderSelfClearingBlock = (lines, reg, field) => {
   const sig = field.sig
   const cnt = `${sig}_hold_cnt`
   const holdConst = `${sanitizeConst(sig)}_HOLD_CYCLES`
   const wdata = maskedWdata(field)
-  const cntWidth = HOLD_COUNTER_WIDTH
+  const holdCycles = holdCyclesOf(field)
+  const cntWidth = holdCounterWidth(holdCycles)
   const namePad = Math.max(`${sig}_o`.length, cnt.length) + 1
 
   if (reg.array) {
@@ -852,8 +877,8 @@ const renderSelfClearingBlock = (lines, reg, field) => {
     lines.push(
       '',
       `  // ${reg.name}[].${field.name} (W1SC): a host write-1 asserts that instance's output,`,
-      `  // which stays asserted for ${holdConst} clocks and then clears itself.`,
-      `  localparam [${cntWidth - 1}:0] ${holdConst} = ${resetLiteral(cntWidth, HOLD_CYCLES)};`,
+      `  // which stays asserted for ${holdConst} (${holdCycles}) clocks and then clears itself.`,
+      `  localparam [${cntWidth - 1}:0] ${holdConst} = ${resetLiteral(cntWidth, holdCycles)};`,
       '',
       `  reg [${cntWidth - 1}:0] ${cnt} [${reg.array.countExpr}];`,
       '',
@@ -883,8 +908,8 @@ const renderSelfClearingBlock = (lines, reg, field) => {
   lines.push(
     '',
     `  // ${reg.name}.${field.name} (W1SC): a host write-1 asserts the output, which stays`,
-    `  // asserted for ${holdConst} clocks and then clears itself.`,
-    `  localparam [${cntWidth - 1}:0] ${holdConst} = ${resetLiteral(cntWidth, HOLD_CYCLES)};`,
+    `  // asserted for ${holdConst} (${holdCycles}) clocks and then clears itself.`,
+    `  localparam [${cntWidth - 1}:0] ${holdConst} = ${resetLiteral(cntWidth, holdCycles)};`,
     '',
     `  reg [${cntWidth - 1}:0] ${cnt};`,
     `  wire ${sig}_set_w = csr_wr_en_i && (csr_addr_i == ${reg.constName}_ADDR) &&`,

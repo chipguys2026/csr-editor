@@ -80,3 +80,19 @@ export const accessColorMap = {
   W1SC: 'fill-orange-200 dark:fill-orange-400',
   RSVD: 'fill-neutral-200 dark:fill-neutral-400',
 }
+
+/**
+ * Clocks a W1SC field stays asserted before it clears itself. Per field, since
+ * the window is chosen to suit whatever consumes the strobe: 1 makes it an
+ * ordinary single-cycle pulse, and a soft reset usually wants more.
+ */
+export const DEFAULT_HOLD_CYCLES = 15
+
+/** The hold window a W1SC field is configured for, or the default. */
+export const holdCyclesOf = (field) => {
+  const value = Number(field?.holdCycles)
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_HOLD_CYCLES
+}
+
+/** Width of the counter that times a hold window, sized to the count. */
+export const holdCounterWidth = (cycles) => cycles.toString(2).length
