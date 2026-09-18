@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react'
-import { FoldVertical, Plus, Trash2, UnfoldVertical } from 'lucide-react'
+import { FoldVertical, Plus, Search, Trash2, UnfoldVertical, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -40,6 +40,7 @@ const rowActionClass =
 export const RegisterItem = ({
   addr,
   isDragging,
+  dragDisabled,
   addrWidth,
   claims,
   issues,
@@ -57,7 +58,7 @@ export const RegisterItem = ({
 
   const sortable = useSortable({
     id: addr,
-    disabled: !reg,
+    disabled: !reg || dragDisabled,
   })
 
   const { setNodeRef, attributes, listeners, transform, transition } = sortable
@@ -97,7 +98,8 @@ export const RegisterItem = ({
         {...listeners}
         className={cn(
           'text-muted-foreground cursor-grab font-mono text-sm whitespace-nowrap',
-          !reg && 'cursor-default opacity-50'
+          (!reg || dragDisabled) && 'cursor-default',
+          !reg && 'opacity-50'
         )}
       >
         {hex(addr, addrWidth)}
@@ -271,6 +273,7 @@ export const RegisterMap = () => {
   const [activeId, setActiveId] = useState(null)
   const [hoveredReg, setHoveredReg] = useState(null)
   const [newAddr, setNewAddr] = useState('')
+  const [query, setQuery] = useState('')
   // Addresses picked out for a bulk move, plus the anchor a shift-click
   // extends the range from.
   const [selected, setSelected] = useState(() => new Set())
@@ -304,7 +307,63 @@ export const RegisterMap = () => {
   // still indexes exactly. Addresses that high are unreachable in practice.
   const maxAddr = Math.min(2 ** addrWidth, Number.MAX_SAFE_INTEGER + 1) - step
 
-  const rows = buildRows(addressMap, step, maxAddr)
+  const allRows = buildRows(addressMap, step, maxAddr)
+
+  /**
+   * Matched against the name, the address in either base, the description and
+   * the field names, since any of those is a reason to be looking for a
+   * register. An array instance answers for the register it belongs to.
+   */
+  const needle = query.trim().toLowerCase()
+
+  /**
+   * 0 for a hit on what the register is called or where it lives, 1 for one
+   * buried in prose, null for no hit. Prose is worth searching -- it is how
+   * you find the register that mentions overflow -- but a word like Bayer
+   * appears in dozens of descriptions and in one register name, and it is that
+   * one you are looking for.
+   */
+  const rank = (addr) => {
+    let best = null
+
+    for (const entry of addressMap.get(addr) ?? []) {
+      const reg = registers[entry.regAddr]
+      if (!reg) continue
+
+      const name = entry.index == null ? reg.name : `${reg.name}[${entry.index}]`
+      const direct = [name, hex(addr, addrWidth), String(addr)]
+      const prose = [
+        reg.description ?? '',
+        ...(reg.fields ?? []).flatMap((field) => [
+          field.name ?? '',
+          field.desc ?? '',
+          // A flag or a coded value is often the thing being looked for, the
+          // register it lives in being what you are trying to find out.
+          ...(field.enumValues ?? []).map((value) => value?.name ?? ''),
+        ]),
+      ]
+
+      const has = (parts) => parts.join('\n').toLowerCase().includes(needle)
+
+      if (has(direct)) return 0
+      if (best == null && has(prose)) best = 1
+    }
+
+    return best
+  }
+
+  // The free runs between registers mean nothing once the list is filtered, so
+  // a search shows only what it found, what it was named for first.
+  const rows = needle
+    ? allRows
+        .filter((row) => row.type === 'register')
+        .map((row) => ({ row, rank: rank(row.addr) }))
+        .filter((entry) => entry.rank != null)
+        .sort((a, b) => a.rank - b.rank || a.row.addr - b.row.addr)
+        .map((entry) => entry.row)
+    : allRows
+
+  const found = rows.filter((row) => registers[row.addr]).length
 
   const selectRow = (addr, event) => {
     const addresses = rows
@@ -482,31 +541,68 @@ export const RegisterMap = () => {
         setActiveId(null)
       }}
     >
-      <div className='mb-2 flex items-center gap-2'>
-        <input
-          value={newAddr}
-          placeholder='0x0000'
-          onChange={(event) => setNewAddr(event.target.value)}
-          onKeyDown={(event) => event.key === 'Enter' && createAtTyped()}
-          className='border-input h-7 w-24 rounded-md border bg-transparent px-2 font-mono text-xs outline-none'
-        />
+      <div className='mb-2 flex flex-col gap-2'>
+        <div className='relative'>
+          <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2 h-3 w-3 -translate-y-1/2' />
 
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          className='h-7'
-          onClick={createAtTyped}
-        >
-          <Plus className='h-3 w-3' />
-          Add register
-        </Button>
+          <input
+            value={query}
+            placeholder='Search'
+            title='Name, address, description or field name'
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
+            className='border-input h-7 w-full rounded-md border bg-transparent pr-6 pl-7 text-xs outline-none'
+          />
 
-        <span className='text-muted-foreground ml-auto text-xs'>
-          {selected.size > 1
-            ? `${selected.size} selected · drag to move together`
-            : `${Object.keys(registers).length} registers`}
-        </span>
+          {query && (
+            <button
+              type='button'
+              title='Clear the search'
+              onClick={() => setQuery('')}
+              className='text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2'
+            >
+              <X className='h-3 w-3' />
+            </button>
+          )}
+        </div>
+
+        <div className='flex items-center gap-2'>
+          <input
+            value={newAddr}
+            placeholder='0x0000'
+            onChange={(event) => setNewAddr(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && createAtTyped()}
+            className='border-input h-7 w-24 rounded-md border bg-transparent px-2 font-mono text-xs outline-none'
+          />
+
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            className='h-7'
+            onClick={createAtTyped}
+          >
+            <Plus className='h-3 w-3' />
+            Add register
+          </Button>
+
+          {/* Never wraps: the panel is narrow and this is the last thing on
+              the row, so it would take three lines of it. */}
+          <span
+            className='text-muted-foreground ml-auto text-xs whitespace-nowrap'
+            title={
+              needle
+                ? `${found} of ${Object.keys(registers).length} registers match`
+                : undefined
+            }
+          >
+            {needle
+              ? `${found} / ${Object.keys(registers).length}`
+              : selected.size > 1
+                ? `${selected.size} selected`
+                : `${Object.keys(registers).length} registers`}
+          </span>
+        </div>
       </div>
 
       <div
@@ -579,6 +675,7 @@ export const RegisterMap = () => {
                       issues={issuesByAddr.get(row.addr)}
                       hoveredReg={hoveredReg}
                       onHoverReg={setHoveredReg}
+                      dragDisabled={Boolean(needle)}
                       isSelected={selected.has(row.addr)}
                       onSelect={selectRow}
                       onInsertBefore={() =>
