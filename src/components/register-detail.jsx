@@ -1137,20 +1137,37 @@ export const RegisterDetail = () => {
       {/* ---------- Header ---------- */}
       <div className='flex flex-col gap-3'>
         <div className='flex items-center gap-2'>
-          <input
-            {...rf('name')}
-            disabled={!isEditing}
-            size={Math.max(watch('name')?.length || 1, 1)}
-            className={cn(
-              'm-0 border-none bg-transparent p-0',
-              'focus:ring-0 focus:outline-none',
-              'disabled:cursor-default disabled:opacity-100',
-              'text-2xl font-bold'
-            )}
-          />
+          {/* The size attribute counts characters of the default font, not of
+              the one this is drawn in, so it came out around a sixth too narrow
+              and the name ran under the buttons. The name is laid out twice
+              instead, stacked in one grid cell: an invisible copy gives the
+              cell its width and the input fills it. */}
+          <div className='grid'>
+            <span
+              aria-hidden
+              className='col-start-1 row-start-1 invisible px-0 text-2xl font-bold whitespace-pre'
+            >
+              {watch('name') || ' '}
+            </span>
+
+            <input
+              {...rf('name')}
+              disabled={!isEditing}
+              // Otherwise the input's own intrinsic width, twenty characters of
+              // a font it is not drawn in, sets the cell instead of the copy.
+              size={1}
+              className={cn(
+                'col-start-1 row-start-1 w-full min-w-0',
+                'm-0 border-none bg-transparent p-0',
+                'focus:ring-0 focus:outline-none',
+                'disabled:cursor-default disabled:opacity-100',
+                'text-2xl font-bold'
+              )}
+            />
+          </div>
 
           {!isEditing ? (
-            <div className='flex items-center gap-2'>
+            <div className='ml-auto flex items-center gap-2'>
               <Button
                 variant='outline'
                 size='icon'
@@ -1172,7 +1189,7 @@ export const RegisterDetail = () => {
               </Button>
             </div>
           ) : (
-            <div className='flex items-center gap-2'>
+            <div className='ml-auto flex items-center gap-2'>
               <Button
                 onClick={onSave}
                 disabled={issues.length > 0}
