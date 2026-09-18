@@ -121,6 +121,10 @@ export const generateCHeader = (params = {}, registerMap = {}) => {
     `#ifndef ${guard}`,
     `#define ${guard}`,
     '',
+    // The PUT helper casts through uint32_t, so the header has to bring its
+    // own declaration of it rather than rely on the including file.
+    '#include <stdint.h>',
+    '',
   ]
 
   if (regs.length > 0) {
