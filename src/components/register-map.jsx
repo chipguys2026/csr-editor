@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { FoldVertical, Plus, Trash2, UnfoldVertical } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -169,9 +169,10 @@ export const RegisterItem = ({
 /** A run of unused addresses, collapsed to one row and open as a drop target. */
 const GapRow = ({ start, end, step, addrWidth, onCreate, onClose, onResize, onClear }) => {
   const words = (end - start) / step + 1
-  const [draft, setDraft] = useState(String(words))
-
-  useEffect(() => setDraft(String(words)), [words])
+  // Null while the input is not being edited, so the row always shows the real
+  // size without an effect to push it back in after a resize.
+  const [draft, setDraft] = useState(null)
+  const text = draft ?? String(words)
 
   const { setNodeRef } = useSortable({
     id: start,
@@ -180,10 +181,13 @@ const GapRow = ({ start, end, step, addrWidth, onCreate, onClose, onResize, onCl
   })
 
   const commit = () => {
-    const next = Number(draft)
+    const next = Number(text)
+
+    // Dropping the draft reverts the input to the real size, which is also
+    // what rolls back a value that was not a word count.
+    setDraft(null)
 
     if (!Number.isInteger(next) || next < 0) {
-      setDraft(String(words))
       return
     }
 
@@ -207,7 +211,7 @@ const GapRow = ({ start, end, step, addrWidth, onCreate, onClose, onResize, onCl
           <span className='flex items-center gap-1 truncate'>
             Reserved ·
             <input
-              value={draft}
+              value={text}
               onChange={(event) => setDraft(event.target.value)}
               onBlur={commit}
               onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()}
