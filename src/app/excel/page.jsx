@@ -158,7 +158,11 @@ const ExcelPage = () => {
                         <td className='px-3 py-2 border text-right'>{row.width}</td>
                         <td className='px-3 py-2 border text-center'>{row.type}</td>
                         <td className='px-3 py-2 border text-right font-mono'>{row.resetValue}</td>
-                        <td className={`px-3 py-2 border ${row.isRegisterRow ? 'italic' : ''}`}>
+                        {/* The sheet wraps this column, so the preview has to
+                            keep the line breaks rather than collapse them. */}
+                        <td
+                          className={`border px-3 py-2 align-top whitespace-pre-wrap ${row.isRegisterRow ? 'italic' : ''}`}
+                        >
                           {row.description}
                         </td>
                       </tr>
@@ -202,7 +206,9 @@ const ExcelPage = () => {
                         <td className='border px-3 py-2 text-right'>{row.width}</td>
                         <td className='border px-3 py-2 text-center'>{row.type}</td>
                         <td className='border px-3 py-2 text-right font-mono'>{row.resetValue}</td>
-                        <td className={`border px-3 py-2 ${row.isRegisterRow ? 'italic' : ''}`}>
+                        <td
+                          className={`border px-3 py-2 align-top whitespace-pre-wrap ${row.isRegisterRow ? 'italic' : ''}`}
+                        >
                           {row.description}
                         </td>
                       </tr>

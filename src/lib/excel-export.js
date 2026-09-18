@@ -75,6 +75,20 @@ const REGISTER_HEADERS = [
   'Description',
 ]
 
+const DESCRIPTION_COLUMN = REGISTER_HEADERS.indexOf('Description')
+
+/**
+ * Descriptions run to several lines, and a column sized to the whole string
+ * would be a thousand characters wide for text that never exceeds eighty. The
+ * width comes from the longest line instead, and the wrapping does the rest.
+ */
+const DESCRIPTION_WIDTH_LIMIT = 80
+
+const longestLine = (value) =>
+  String(value ?? '')
+    .split('\n')
+    .reduce((widest, line) => Math.max(widest, line.length), 0)
+
 const CELL_BORDER = {
   top: { style: 'thin', color: { rgb: '000000' } },
   bottom: { style: 'thin', color: { rgb: '000000' } },
@@ -100,9 +114,13 @@ const buildRegisterSheet = (rows) => {
 
   const sheet = XLSX.utils.aoa_to_sheet(data)
 
-  sheet['!cols'] = REGISTER_HEADERS.map((_, col) => ({
-    wch: Math.max(10, ...data.map((row) => String(row[col] ?? '').length + 2)),
-  }))
+  sheet['!cols'] = REGISTER_HEADERS.map((_, col) => {
+    const wch = Math.max(10, ...data.map((row) => longestLine(row[col]) + 2))
+
+    return {
+      wch: col === DESCRIPTION_COLUMN ? Math.min(wch, DESCRIPTION_WIDTH_LIMIT) : wch,
+    }
+  })
 
   const range = XLSX.utils.decode_range(sheet['!ref'])
 
@@ -121,13 +139,22 @@ const buildRegisterSheet = (rows) => {
         continue
       }
 
+      // Without wrapText a description shows only its first line: Excel keeps
+      // the newlines in the cell but lays it out as one. Top alignment so the
+      // short columns sit against the first line of a tall wrapped row.
+      const alignment =
+        col === DESCRIPTION_COLUMN
+          ? { wrapText: true, vertical: 'top' }
+          : { vertical: 'top' }
+
       cell.s = rows[row - 1]?.isRegisterRow
         ? {
             fill: { fgColor: { rgb: 'D6DCE4' } },
-            font: { bold: col === 1, italic: col === 7 },
+            font: { bold: col === 1, italic: col === DESCRIPTION_COLUMN },
             border: CELL_BORDER,
+            alignment,
           }
-        : { border: CELL_BORDER }
+        : { border: CELL_BORDER, alignment }
     }
   }
 
