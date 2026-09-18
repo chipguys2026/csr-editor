@@ -679,6 +679,21 @@ export const RegisterDetail = () => {
     )
   )
 
+  // Reset follows its widest value for the same reason: a reserved span across
+  // the top of the register renders 0x00000000, which ran under the
+  // description at the fixed width the column used to have.
+  const resetColumnChars = Math.max(
+    'Reset'.length,
+    ...fullFields.map(
+      (field) =>
+        hex(field.resetValue, field.bitRange.msb - field.bitRange.lsb + 1).length
+    )
+  )
+
+  // W1SC carries a hold window beside its access type, which does not fit the
+  // width the column has when every row is just a badge or a select.
+  const hasHoldWindow = fullFields.some((field) => field.type === 'W1SC')
+
   const totalBitsUsed = calcTotalBitsUsed(fields)
   const canInsert = isEditing && totalBitsUsed < dataWidth
 
@@ -1102,8 +1117,18 @@ export const RegisterDetail = () => {
               >
                 Bits
               </TableHead>
-              <TableHead className='w-24 text-center'>Type</TableHead>
-              <TableHead className='w-20 text-right'>Reset</TableHead>
+              <TableHead
+                className='text-center'
+                style={{ width: hasHoldWindow ? '10rem' : '6rem' }}
+              >
+                Type
+              </TableHead>
+              <TableHead
+                className='text-right font-mono'
+                style={{ width: `calc(${resetColumnChars}ch + 2rem)` }}
+              >
+                Reset
+              </TableHead>
               <TableHead>Description</TableHead>
             </TableRow>
           </TableHeader>
