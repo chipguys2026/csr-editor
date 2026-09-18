@@ -144,9 +144,16 @@ export const generateCHeader = (params = {}, registerMap = {}) => {
     )
   }
 
+  // Names of the scalar registers and the arrays, for the X-macro tables.
+  const table = []
+  const arrayTable = []
+
   for (const { addr, register } of regs) {
     const name = sanitizeMacro(register?.name ?? `REG_${addr}`)
     const array = register?.array
+    // The whole register at reset, for restoring defaults in one write.
+    let resetWord = 0n
+    let resetCollision = false
 
     lines.push(...registerComment(addr, register?.description, digits))
 
@@ -174,11 +181,72 @@ export const generateCHeader = (params = {}, registerMap = {}) => {
         `#define ${prefix}_${name}_${fieldName}_SHIFT ${lsb}u`,
         `#define ${prefix}_${name}_${fieldName}_MASK ` +
           `0x${mask.toString(16).toUpperCase().padStart(8, '0')}u   ` +
-          `/* [${msb}:${lsb}] ${field?.type ?? ''}, reset 0x${reset.toString(16).toUpperCase()} */`
+          `/* [${msb}:${lsb}] ${field?.type ?? ''}, reset 0x${reset.toString(16).toUpperCase()} */`,
+        // The field's own reset, unshifted, so it pairs with _PUT.
+        `#define ${prefix}_${name}_${fieldName}_RESET 0x${reset.toString(16).toUpperCase()}u`
+      )
+
+      resetWord |= (BigInt(reset) << BigInt(lsb)) & mask
+      if (fieldName === 'RESET') {
+        resetCollision = true
+      }
+    }
+
+    if (resetCollision) {
+      lines.push(
+        `/* No ${prefix}_${name}_RESET: the register has a field called RESET. */`
+      )
+    } else {
+      lines.push(
+        `#define ${prefix}_${name}_RESET 0x${resetWord.toString(16).toUpperCase().padStart(8, '0')}u   /* the whole register at reset */`
       )
     }
 
+    if (array) {
+      const stride = Number(array.stride ?? step)
+      const count = resolveCount(array.count, parameters)
+      arrayTable.push([name, hex(addr, digits), `0x${stride.toString(16).toUpperCase()}`, count ?? array.count])
+    } else {
+      table.push([name, hex(addr, digits)])
+    }
+
     lines.push('')
+  }
+
+  if (table.length > 0) {
+    const pad = Math.max(...table.map(([entry]) => entry.length))
+
+    lines.push(
+      '/* Every register in one list, so a dump or a defaults pass does not have',
+      ' * to repeat them:',
+      ' *',
+      ` *     #define X(name, off) printf("%s = %08x\\n", #name, rd(off));`,
+      ` *     ${prefix}_REGISTERS(X)`,
+      ' *     #undef X',
+      ' */',
+      `#define ${prefix}_REGISTERS(X) \\`,
+      ...table.map(
+        ([entry, off], index) =>
+          `    X(${`${entry},`.padEnd(pad + 2)}${off}u)${index < table.length - 1 ? ' \\' : ''}`
+      ),
+      ''
+    )
+  }
+
+  if (arrayTable.length > 0) {
+    const pad = Math.max(...arrayTable.map(([entry]) => entry.length))
+
+    lines.push(
+      '/* The arrayed registers, which have a base and a stride rather than one',
+      ' * offset: X(name, base, stride, count).',
+      ' */',
+      `#define ${prefix}_REGISTER_ARRAYS(X) \\`,
+      ...arrayTable.map(
+        ([entry, base, stride, count], index) =>
+          `    X(${`${entry},`.padEnd(pad + 2)}${base}u, ${stride}u, ${count}u)${index < arrayTable.length - 1 ? ' \\' : ''}`
+      ),
+      ''
+    )
   }
 
   lines.push(
