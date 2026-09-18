@@ -55,7 +55,9 @@ export const accessTypes = [
     port: 'out',
     readable: true,
     description:
-      'Write-1 self-clearing; asserted for a hold window then auto-clears.',
+      'Write-1 self-clearing; asserted for a hold window then auto-clears. ' +
+      'Reads back its live value, so software can poll whether the window is ' +
+      'still open.',
   },
 ]
 
