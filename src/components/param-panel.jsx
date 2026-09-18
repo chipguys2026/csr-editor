@@ -18,6 +18,7 @@ import {
   FieldGroup,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { defaultHeaderPrefix } from '@/lib/csr-header'
 import { cn } from '@/lib/utils'
 import {
   Select,
@@ -35,6 +36,7 @@ const sameParams = (a, b) =>
   a.addrWidth === b.addrWidth &&
   a.interface === b.interface &&
   a.moduleName === b.moduleName &&
+  (a.headerPrefix ?? '') === (b.headerPrefix ?? '') &&
   Boolean(a.registeredReadback) === Boolean(b.registeredReadback) &&
   JSON.stringify(a.parameters ?? []) === JSON.stringify(b.parameters ?? [])
 
@@ -45,6 +47,7 @@ export const ParamPanel = () => {
     interface: csrInterface,
     moduleName,
     parameters,
+    headerPrefix,
     registeredReadback,
     setParams,
   } = useParamStore()
@@ -58,6 +61,7 @@ export const ParamPanel = () => {
       interface: csrInterface || 'Native',
       moduleName: moduleName || 'CSR',
       parameters: parameters ?? [],
+      headerPrefix: headerPrefix ?? '',
       registeredReadback: Boolean(registeredReadback),
     },
   })
@@ -69,6 +73,7 @@ export const ParamPanel = () => {
       interface: csrInterface,
       moduleName,
       parameters: parameters ?? [],
+      headerPrefix: headerPrefix ?? '',
       registeredReadback: Boolean(registeredReadback),
     }
 
@@ -84,6 +89,7 @@ export const ParamPanel = () => {
     csrInterface,
     moduleName,
     parameters,
+    headerPrefix,
     registeredReadback,
   ])
 
@@ -109,6 +115,7 @@ export const ParamPanel = () => {
         interface: csrInterface,
         moduleName,
         parameters,
+        headerPrefix,
         registeredReadback,
       })
     ) {
@@ -189,6 +196,34 @@ export const ParamPanel = () => {
                 value={field.value ?? ''}
                 onChange={(e) => commitParamChange('moduleName', e.target.value)}
               />
+
+              {fieldState.error && (
+                <FieldError errors={[{ message: fieldState.error.message }]} />
+              )}
+            </Field>
+          )}
+        />
+
+        {/* C header prefix */}
+        <Controller
+          name='headerPrefix'
+          control={form.control}
+          render={({ field, fieldState }) => (
+            <Field data-invalid={fieldState.invalid}>
+              <FieldLabel htmlFor='headerPrefix'>C Header Prefix</FieldLabel>
+
+              <Input
+                id='headerPrefix'
+                {...field}
+                value={field.value ?? ''}
+                placeholder={defaultHeaderPrefix(moduleName)}
+                onChange={(e) => commitParamChange('headerPrefix', e.target.value)}
+              />
+
+              <FieldDescription>
+                Goes in front of every macro in the C header. Blank follows the
+                module name; set it when software already calls the old one.
+              </FieldDescription>
 
               {fieldState.error && (
                 <FieldError errors={[{ message: fieldState.error.message }]} />

@@ -71,6 +71,7 @@ export const NavBar = () => {
     { label: 'Document', value: 'document', path: '/document' },
     { label: 'Excel', value: 'excel', path: '/excel' },
     { label: 'RTL', value: 'rtl', path: '/rtl' },
+    { label: 'C Header', value: 'header', path: '/header' },
     { label: 'SDC', value: 'sdc', path: '/sdc' },
   ]
   const currentView =

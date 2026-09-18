@@ -57,6 +57,14 @@ export const paramsSchema = z.object({
     })
     .default([]),
 
+  // Macro prefix for the generated C header. Blank derives it from the module
+  // name; set it when software is already written against another one.
+  headerPrefix: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z_][A-Za-z0-9_]*$|^$/, 'Use letters, numbers, and underscores only')
+    .default(''),
+
   // Register the readback mux output. Costs one cycle of read latency and
   // shortens the path from the field flops to whatever consumes csr_rdata_o.
   registeredReadback: z.boolean().default(false),
