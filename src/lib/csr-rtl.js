@@ -546,6 +546,9 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
         // An RO field whose value never changes: tied off in the block rather
         // than exposed as an input the caller has to drive.
         constant: Boolean(field?.constant),
+        // 'bitmask' names a bit of the field rather than a value of it: the
+        // field then holds any combination of them at once.
+        valueKind: field?.valueKind === 'bitmask' ? 'bitmask' : 'code',
         // Named values the field can hold, emitted as localparams so the RTL
         // can be read against the same names software uses.
         enumValues: (field?.enumValues ?? []).map((entry) => ({
@@ -680,18 +683,21 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
 
         if (seenCodes.has(entry.value)) {
           throw new Error(
-            `${reg.name}.${field.name}: '${entry.name}' repeats the code ${entry.value}`
+            field.valueKind === 'bitmask'
+              ? `${reg.name}.${field.name}: '${entry.name}' repeats bit ${entry.value}`
+              : `${reg.name}.${field.name}: '${entry.name}' repeats the code ${entry.value}`
           )
         }
         seenCodes.add(entry.value)
 
-        if (
-          !Number.isInteger(entry.value) ||
-          entry.value < 0 ||
-          entry.value > 2 ** field.width - 1
-        ) {
+        const limit =
+          field.valueKind === 'bitmask' ? field.width - 1 : 2 ** field.width - 1
+
+        if (!Number.isInteger(entry.value) || entry.value < 0 || entry.value > limit) {
           throw new Error(
-            `${reg.name}.${field.name}: value ${entry.value} for '${entry.name}' does not fit ${field.width} bit(s)`
+            field.valueKind === 'bitmask'
+              ? `${reg.name}.${field.name}: bit ${entry.value} for '${entry.name}' is outside a ${field.width}-bit field`
+              : `${reg.name}.${field.name}: value ${entry.value} for '${entry.name}' does not fit ${field.width} bit(s)`
           )
         }
       }
@@ -1345,9 +1351,11 @@ const renderEnumPackage = ({ moduleName, regs }) => {
       const base = `${reg.constName}_${sanitizeConst(field.name)}`
       const pad = Math.max(...field.enumValues.map((entry) => entry.constName.length))
 
+      const bitmask = field.valueKind === 'bitmask'
+
       lines.push(
         '',
-        `  // ${reg.name}.${field.name}${
+        `  // ${reg.name}.${field.name}${bitmask ? ', one bit each' : ''}${
           field.widthExpr
             ? `, ${field.width} bits at the current ${field.widthExpr}`
             : ''
@@ -1355,8 +1363,12 @@ const renderEnumPackage = ({ moduleName, regs }) => {
       )
 
       for (const entry of field.enumValues) {
+        // A flag is worth its own mask, so it can be tested against the field
+        // directly rather than through the bit number.
+        const value = bitmask ? 1 << entry.value : entry.value
         lines.push(
-          `  localparam ${widthDecl(field.width)}${base}_${entry.constName.padEnd(pad)} = ${resetLiteral(field.width, entry.value)};`
+          `  localparam ${widthDecl(field.width)}${base}_${entry.constName.padEnd(pad)} = ${resetLiteral(field.width, value)};` +
+            (bitmask ? `  // bit ${entry.value}` : '')
         )
       }
     }

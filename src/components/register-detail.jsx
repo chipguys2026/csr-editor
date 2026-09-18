@@ -664,10 +664,14 @@ const FieldEnumEditor = ({ field, isEditing, watch, setValue }) => {
   // What is being typed, by row. Kept out of the field so a half-typed value
   // cannot follow the register into the saved document.
   const [drafts, setDrafts] = useState({})
+  const kindPath = `fields.${field.trueIndex}.valueKind`
+  // Codes name what the field holds; bits name what it holds one of each of.
+  const bitmask = watch(kindPath) === 'bitmask'
+
   const width = field.bitRange.msb - field.bitRange.lsb + 1
-  const max = 2 ** width - 1
-  // A field of n bits has 2**n codes and cannot name more than that.
-  const capacity = 2 ** width
+  const max = bitmask ? width - 1 : 2 ** width - 1
+  // n bits give n flags, or 2**n codes, and no more of either.
+  const capacity = bitmask ? width : 2 ** width
   const full = values.length >= capacity
 
   const used = values.map((entry) => Number(entry?.value))
@@ -689,10 +693,27 @@ const FieldEnumEditor = ({ field, isEditing, watch, setValue }) => {
 
   return (
     <div className='bg-muted/30 flex w-full flex-col gap-1 rounded-md border p-2'>
-      <div className='text-muted-foreground grid grid-cols-[8rem_5rem_minmax(0,1fr)_auto] gap-2 text-xs'>
+      <div className='text-muted-foreground grid grid-cols-[8rem_5rem_minmax(0,1fr)_auto] items-center gap-2 text-xs'>
         <span>Name</span>
-        <span>Value</span>
-        <span>Description</span>
+        <span>{bitmask ? 'Bit' : 'Value'}</span>
+
+        {isEditing ? (
+          <label className='flex items-center gap-1'>
+            <input
+              type='checkbox'
+              checked={bitmask}
+              onChange={(event) =>
+                setValue(kindPath, event.target.checked ? 'bitmask' : 'code', {
+                  shouldDirty: true,
+                })
+              }
+            />
+            One bit each, rather than one value at a time
+          </label>
+        ) : (
+          <span>{bitmask ? 'Description (one bit each)' : 'Description'}</span>
+        )}
+
         <span />
       </div>
 
@@ -716,13 +737,20 @@ const FieldEnumEditor = ({ field, isEditing, watch, setValue }) => {
             />
 
             <input
-              value={drafts[index] ?? `0x${value.toString(16).toUpperCase()}`}
+              value={
+                drafts[index] ??
+                (bitmask ? String(value) : `0x${value.toString(16).toUpperCase()}`)
+              }
               disabled={!isEditing}
               title={
                 duplicate
-                  ? 'Another value already uses this code'
+                  ? bitmask
+                    ? 'Another flag already uses this bit'
+                    : 'Another value already uses this code'
                   : bad
-                    ? `Does not fit ${width} bit(s)`
+                    ? bitmask
+                      ? `Outside a ${width}-bit field`
+                      : `Does not fit ${width} bit(s)`
                     : `0..${max}`
               }
               onChange={(event) => {
@@ -781,8 +809,12 @@ const FieldEnumEditor = ({ field, isEditing, watch, setValue }) => {
             disabled={full}
             title={
               full
-                ? `A ${width}-bit field has only ${capacity} code(s), all named`
-                : 'Name another code'
+                ? bitmask
+                  ? `A ${width}-bit field has only ${width} bit(s), all named`
+                  : `A ${width}-bit field has only ${capacity} code(s), all named`
+                : bitmask
+                  ? 'Name another bit'
+                  : 'Name another code'
             }
             onClick={() =>
               // The next code nothing else uses, so a run does not need
@@ -795,7 +827,7 @@ const FieldEnumEditor = ({ field, isEditing, watch, setValue }) => {
           </Button>
 
           <span className='text-muted-foreground text-xs'>
-            {values.length} of {capacity} code(s) named
+            {values.length} of {capacity} {bitmask ? 'bit' : 'code'}(s) named
           </span>
         </div>
       )}

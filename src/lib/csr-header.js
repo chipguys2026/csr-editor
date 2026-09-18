@@ -79,9 +79,11 @@ const fieldComment = (desc) =>
 const RESERVED_ENUM_NAMES = ['SHIFT', 'MASK', 'RESET']
 
 /**
- * The named values a field can hold. The map carries them so the header, and
- * anything else generated from it, can state them instead of leaving software
- * to copy the numbers out of a description and drift from them.
+ * The names a field carries, which are one of two things. A coded field holds
+ * one of them at a time, so the name is the value. A bit-flag field holds any
+ * combination, so the name is a bit and what it is worth is that bit's mask --
+ * which is what lets software write `v & FLAG` rather than work the shift out
+ * for itself.
  */
 const enumLines = (prefix, regName, fieldName, field, width) => {
   const values = field?.enumValues ?? []
@@ -90,7 +92,8 @@ const enumLines = (prefix, regName, fieldName, field, width) => {
     return []
   }
 
-  const limit = 2 ** width - 1
+  const bitmask = field?.valueKind === 'bitmask'
+  const limit = bitmask ? width - 1 : 2 ** width - 1
   const seen = new Set()
   const codes = new Set()
   const out = []
@@ -112,7 +115,9 @@ const enumLines = (prefix, regName, fieldName, field, width) => {
 
     if (!Number.isInteger(value) || value < 0 || value > limit) {
       throw new Error(
-        `${regName}.${field.name}: value ${entry?.value} for '${name}' does not fit ${width} bit(s)`
+        bitmask
+          ? `${regName}.${field.name}: bit ${entry?.value} for '${name}' is outside a ${width}-bit field`
+          : `${regName}.${field.name}: value ${entry?.value} for '${name}' does not fit ${width} bit(s)`
       )
     }
 
@@ -120,16 +125,23 @@ const enumLines = (prefix, regName, fieldName, field, width) => {
     // and the field cannot hold more codes than its width allows either way.
     if (codes.has(value)) {
       throw new Error(
-        `${regName}.${field.name}: '${name}' repeats the code ${value}`
+        bitmask
+          ? `${regName}.${field.name}: '${name}' repeats bit ${value}`
+          : `${regName}.${field.name}: '${name}' repeats the code ${value}`
       )
     }
     codes.add(value)
 
     const desc = String(entry?.desc ?? '').trim()
+    // The flag's mask, so it can be tested and set directly.
+    const literal = bitmask ? 1 << value : value
+    const note = [bitmask ? `bit ${value}` : null, desc.split('\n')[0] || null]
+      .filter(Boolean)
+      .join(', ')
 
     out.push(
-      `#define ${prefix}_${regName}_${fieldName}_${name} 0x${value.toString(16).toUpperCase()}u` +
-        (desc ? `   /* ${desc.split('\n')[0]} */` : '')
+      `#define ${prefix}_${regName}_${fieldName}_${name} 0x${literal.toString(16).toUpperCase()}u` +
+        (note ? `   /* ${note} */` : '')
     )
   }
 

@@ -21,11 +21,16 @@ const describeField = (field) => {
     return desc
   }
 
+  const bitmask = field.valueKind === 'bitmask'
+
   const listed = values.map((entry) => {
-    const code = `0x${Number(entry?.value ?? 0).toString(16).toUpperCase()}`
+    const value = Number(entry?.value ?? 0)
+    const label = bitmask
+      ? `bit ${value}`
+      : `0x${value.toString(16).toUpperCase()}`
     const note = String(entry?.desc ?? '').trim()
 
-    return `${code} = ${entry?.name ?? ''}${note ? ` (${note})` : ''}`
+    return `${label} = ${entry?.name ?? ''}${note ? ` (${note})` : ''}`
   })
 
   return [desc, ...listed].filter(Boolean).join('\n')
