@@ -43,6 +43,40 @@ export const defaultHeaderPrefix = (moduleName) => headerBase(moduleName)
 const hex = (value, digits) =>
   `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`
 
+/** Column the generated comments wrap at, prefix included. */
+const COMMENT_WIDTH = 78
+
+/**
+ * Break a paragraph into lines that fit. The map stores prose as one line per
+ * paragraph and leaves the wrapping to whatever renders it, so the header has
+ * to do its own rather than inherit a width chosen for something else. A line
+ * that is already indented is a list the author laid out by hand, and is left
+ * exactly as it is.
+ */
+const wrapLine = (line, width) => {
+  if (/^\s/.test(line) || line.length <= width) {
+    return [line]
+  }
+
+  const out = []
+  let current = ''
+
+  for (const word of line.split(' ')) {
+    if (current && current.length + 1 + word.length > width) {
+      out.push(current)
+      current = word
+    } else {
+      current = current ? `${current} ${word}` : word
+    }
+  }
+
+  if (current) {
+    out.push(current)
+  }
+
+  return out
+}
+
 /**
  * Prose from the register map, reflowed into a block comment so the header
  * carries the same text rather than sending the reader back to the JSON.
@@ -54,11 +88,17 @@ const registerComment = (addr, description, digits) => {
     return [`/* ${hex(addr, digits)} */`]
   }
 
+  const head = `/* ${hex(addr, digits)}  `
+  const cont = ' *          '
   const [first, ...rest] = text.split('\n')
+  const [firstHead, ...firstRest] = wrapLine(first, COMMENT_WIDTH - head.length)
 
   return [
-    `/* ${hex(addr, digits)}  ${first}`,
-    ...rest.map((line) => (line ? ` *          ${line}` : ' *')),
+    `${head}${firstHead}`,
+    ...firstRest.map((line) => `${cont}${line}`),
+    ...rest.flatMap((line) =>
+      line ? wrapLine(line, COMMENT_WIDTH - cont.length).map((part) => `${cont}${part}`) : [' *']
+    ),
     ' */',
   ]
 }
@@ -68,6 +108,7 @@ const fieldComment = (desc) =>
     .trim()
     .split('\n')
     .filter((line, index, lines) => line !== '' || lines.length > 1)
+    .flatMap((line) => (line ? wrapLine(line, COMMENT_WIDTH - 10) : ['']))
     .map((line) => (line ? `    /* ${line} */` : '    /* */'))
 
 /**
