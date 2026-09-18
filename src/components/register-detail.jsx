@@ -24,7 +24,15 @@ import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { useCurrentRegisterStore } from '@/store/current-register-store'
 
-import { GripVertical, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import {
+  ChevronRight,
+  GripVertical,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from 'lucide-react'
 
 import { RegisterDiagram } from './register-diagram'
 import { Badge } from './ui/badge'
@@ -614,6 +622,187 @@ const FieldInsertLine = ({ show, onClick }) => {
 }
 
 
+/**
+ * The named values a field can hold. Carrying them here rather than spelling
+ * them out in the description is what lets the generated header state them, so
+ * software stops copying the numbers out of prose and drifting from it.
+ */
+const FieldEnumToggle = ({ field, isEditing, watch, open, onToggle }) => {
+  const values = watch(`fields.${field.trueIndex}.enumValues`) ?? []
+
+  // Nothing to reveal on a field that has none and cannot be given any.
+  if (!isEditing && values.length === 0) {
+    return null
+  }
+
+  return (
+    <button
+      type='button'
+      onClick={onToggle}
+      title='Named values for this field'
+      className='text-muted-foreground hover:text-foreground mt-0.5 flex items-center gap-0.5 text-xs'
+    >
+      <ChevronRight
+        className={cn('h-3 w-3 transition-transform', open && 'rotate-90')}
+      />
+      {values.length > 0 ? `${values.length} value(s)` : 'add values'}
+    </button>
+  )
+}
+
+const parseEnumValue = (text) => {
+  const raw = String(text).trim().toLowerCase()
+
+  if (/^0x[0-9a-f]+$/.test(raw)) return parseInt(raw.slice(2), 16)
+  if (/^\d+$/.test(raw)) return Number(raw)
+  return NaN
+}
+
+const FieldEnumEditor = ({ field, isEditing, watch, setValue }) => {
+  const path = `fields.${field.trueIndex}.enumValues`
+  const values = watch(path) ?? []
+  // What is being typed, by row. Kept out of the field so a half-typed value
+  // cannot follow the register into the saved document.
+  const [drafts, setDrafts] = useState({})
+  const width = field.bitRange.msb - field.bitRange.lsb + 1
+  const max = 2 ** width - 1
+  // A field of n bits has 2**n codes and cannot name more than that.
+  const capacity = 2 ** width
+  const full = values.length >= capacity
+
+  const used = values.map((entry) => Number(entry?.value))
+  const nextFree = () => {
+    for (let code = 0; code <= max; code += 1) {
+      if (!used.includes(code)) return code
+    }
+    return 0
+  }
+
+  const commit = (next) => setValue(path, next, { shouldDirty: true })
+
+  const patch = (index, change) =>
+    commit(values.map((entry, i) => (i === index ? { ...entry, ...change } : entry)))
+
+  if (values.length === 0 && !isEditing) {
+    return null
+  }
+
+  return (
+    <div className='bg-muted/30 flex w-full flex-col gap-1 rounded-md border p-2'>
+      <div className='text-muted-foreground grid grid-cols-[8rem_5rem_minmax(0,1fr)_auto] gap-2 text-xs'>
+        <span>Name</span>
+        <span>Value</span>
+        <span>Description</span>
+        <span />
+      </div>
+
+      {values.map((entry, index) => {
+        const value = Number(entry?.value ?? 0)
+        const duplicate = used.indexOf(value) !== index
+        const bad =
+          !Number.isInteger(value) || value < 0 || value > max || duplicate
+
+        return (
+          <div
+            key={index}
+            className='grid grid-cols-[8rem_5rem_minmax(0,1fr)_auto] items-center gap-2'
+          >
+            <input
+              value={entry?.name ?? ''}
+              placeholder='NAME'
+              disabled={!isEditing}
+              onChange={(event) => patch(index, { name: event.target.value })}
+              className='border-input h-6 rounded-md border bg-transparent px-1 font-mono text-xs'
+            />
+
+            <input
+              value={drafts[index] ?? `0x${value.toString(16).toUpperCase()}`}
+              disabled={!isEditing}
+              title={
+                duplicate
+                  ? 'Another value already uses this code'
+                  : bad
+                    ? `Does not fit ${width} bit(s)`
+                    : `0..${max}`
+              }
+              onChange={(event) => {
+                const text = event.target.value
+                const next = parseEnumValue(text)
+
+                setDrafts({ ...drafts, [index]: text })
+                if (!Number.isNaN(next)) {
+                  patch(index, { value: next })
+                }
+              }}
+              onBlur={() =>
+                setDrafts((current) => {
+                  const next = { ...current }
+                  delete next[index]
+                  return next
+                })
+              }
+              className={cn(
+                'border-input h-6 rounded-md border bg-transparent px-1 text-right font-mono text-xs',
+                bad && 'border-destructive text-destructive'
+              )}
+            />
+
+            <input
+              value={entry?.desc ?? ''}
+              placeholder='what it selects'
+              disabled={!isEditing}
+              onChange={(event) => patch(index, { desc: event.target.value })}
+              className='border-input h-6 rounded-md border bg-transparent px-1 text-xs'
+            />
+
+            {isEditing ? (
+              <button
+                type='button'
+                title='Remove this value'
+                onClick={() => commit(values.filter((_, i) => i !== index))}
+                className='text-destructive'
+              >
+                <Trash2 className='h-3 w-3' />
+              </button>
+            ) : (
+              <span />
+            )}
+          </div>
+        )
+      })}
+
+      {isEditing && (
+        <div className='flex items-center gap-2'>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            className='h-6'
+            disabled={full}
+            title={
+              full
+                ? `A ${width}-bit field has only ${capacity} code(s), all named`
+                : 'Name another code'
+            }
+            onClick={() =>
+              // The next code nothing else uses, so a run does not need
+              // retyping and a gap gets filled rather than duplicated.
+              commit([...values, { name: '', value: nextFree(), desc: '' }])
+            }
+          >
+            <Plus className='h-3 w-3' />
+            Add value
+          </Button>
+
+          <span className='text-muted-foreground text-xs'>
+            {values.length} of {capacity} code(s) named
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export const RegisterDetail = () => {
   const { dataWidth, addrWidth, parameters } = useParamStore()
   const step = dataWidth / 8
@@ -634,6 +823,8 @@ export const RegisterDetail = () => {
   const [dropField, setDropField] = useState(null)
   // Set while the address badge is being edited.
   const [addressDraft, setAddressDraft] = useState(null)
+  // Field whose named values are expanded, by trueIndex.
+  const [openEnum, setOpenEnum] = useState(null)
 
   const {
     register: rf,
@@ -1285,6 +1476,9 @@ export const RegisterDetail = () => {
                         />
                       </TableCell>
 
+                      {/* The values belong to this field, so they sit in its
+                          own row under its description rather than in a row of
+                          their own that splits the table. */}
                       <TableCell className='align-top'>
                         <FieldDesc
                           field={field}
@@ -1292,6 +1486,29 @@ export const RegisterDetail = () => {
                           rf={rf}
                           watch={watch}
                         />
+
+                        <FieldEnumToggle
+                          field={field}
+                          isEditing={isEditing}
+                          watch={watch}
+                          open={openEnum === field.trueIndex}
+                          onToggle={() =>
+                            setOpenEnum(
+                              openEnum === field.trueIndex ? null : field.trueIndex
+                            )
+                          }
+                        />
+
+                        {openEnum === field.trueIndex && (
+                          <div className='mt-1'>
+                            <FieldEnumEditor
+                              field={field}
+                              isEditing={isEditing}
+                              watch={watch}
+                              setValue={setValue}
+                            />
+                          </div>
+                        )}
                       </TableCell>
                     </>
                   )}

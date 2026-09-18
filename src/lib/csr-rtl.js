@@ -69,6 +69,11 @@ const fieldReset = (field) =>
     ? `${field.widthExpr}'(${field.reset})`
     : resetLiteral(field.width, field.reset)
 const arrayDimSuffix = (port) => (port.arrayDim ? ` [${port.arrayDim}]` : '')
+/** A named value sized to its field, symbolic when the width is a parameter. */
+const enumLiteral = (field, value) =>
+  field.widthExpr
+    ? `${field.widthExpr}'(${value})`
+    : resetLiteral(field.width, value)
 
 /**
  * The bits of a field a write is allowed to touch, from the byte enables. A
@@ -546,6 +551,13 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
         // An RO field whose value never changes: tied off in the block rather
         // than exposed as an input the caller has to drive.
         constant: Boolean(field?.constant),
+        // Named values the field can hold, emitted as localparams so the RTL
+        // can be read against the same names software uses.
+        enumValues: (field?.enumValues ?? []).map((entry) => ({
+          name: String(entry?.name ?? ''),
+          constName: sanitizeConst(String(entry?.name ?? 'VALUE')),
+          value: Number(entry?.value ?? 0),
+        })),
         // Only meaningful for W1SC; validated below. Blank means "default",
         // which is what a cleared input submits before it has been blurred.
         holdCycles:
@@ -658,6 +670,35 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
         throw new Error(
           `${reg.name}.${field.name}: resetValue ${field.reset} does not fit width ${field.width}`
         )
+      }
+
+      const seenValues = new Set()
+      const seenCodes = new Set()
+
+      for (const entry of field.enumValues) {
+        if (seenValues.has(entry.constName)) {
+          throw new Error(
+            `${reg.name}.${field.name}: duplicate value name '${entry.name}'`
+          )
+        }
+        seenValues.add(entry.constName)
+
+        if (seenCodes.has(entry.value)) {
+          throw new Error(
+            `${reg.name}.${field.name}: '${entry.name}' repeats the code ${entry.value}`
+          )
+        }
+        seenCodes.add(entry.value)
+
+        if (
+          !Number.isInteger(entry.value) ||
+          entry.value < 0 ||
+          entry.value > 2 ** field.width - 1
+        ) {
+          throw new Error(
+            `${reg.name}.${field.name}: value ${entry.value} for '${entry.name}' does not fit ${field.width} bit(s)`
+          )
+        }
       }
 
       if (field.constant && field.access !== 'RO') {
@@ -1012,6 +1053,27 @@ const renderCsrBlock = ({
 
   for (const reg of scalarRegs) {
     lines.push(`  localparam [ADDR_WIDTH-1:0] ${reg.constName}_ADDR = ADDR_WIDTH'(${reg.addr});`)
+  }
+
+  for (const reg of regs) {
+    const named = reg.fields.filter((field) => field.enumValues.length > 0)
+
+    for (const field of named) {
+      const pad =
+        Math.max(...field.enumValues.map((entry) => entry.constName.length)) +
+        reg.constName.length +
+        sanitizeConst(field.name).length +
+        2
+
+      lines.push('', `  // ${reg.name}.${field.name} named values`)
+
+      for (const entry of field.enumValues) {
+        const name = `${reg.constName}_${sanitizeConst(field.name)}_${entry.constName}`
+        lines.push(
+          `  localparam ${fieldWidthDecl(field)}${name.padEnd(pad)} = ${enumLiteral(field, entry.value)};`
+        )
+      }
+    }
   }
 
   if (registeredReadback) {

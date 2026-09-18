@@ -8,6 +8,29 @@ import {
 } from './register'
 import { buildAddressMap } from './address-map'
 
+/**
+ * A field's description with its named values listed under it. The sheet is
+ * what gets read away from the tool, so the codes belong next to the prose
+ * rather than only in the generated header.
+ */
+const describeField = (field) => {
+  const desc = String(field.desc ?? '')
+  const values = field.enumValues ?? []
+
+  if (values.length === 0) {
+    return desc
+  }
+
+  const listed = values.map((entry) => {
+    const code = `0x${Number(entry?.value ?? 0).toString(16).toUpperCase()}`
+    const note = String(entry?.desc ?? '').trim()
+
+    return `${code} = ${entry?.name ?? ''}${note ? ` (${note})` : ''}`
+  })
+
+  return [desc, ...listed].filter(Boolean).join('\n')
+}
+
 /** The register header row plus one row per field, as the sheets present it. */
 const registerBlock = (address, name, reg, params) => [
   {
@@ -35,7 +58,7 @@ const registerBlock = (address, name, reg, params) => [
     width: field.bitRange.width ?? resolveWidth(field.bitRange, params.parameters),
     type: field.type,
     resetValue: `0x${field.resetValue.toString(16).toUpperCase()}`,
-    description: field.desc,
+    description: describeField(field),
   })),
 ]
 

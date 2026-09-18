@@ -57,13 +57,31 @@ const HeaderPage = () => {
   const params = useParamStore()
   const registers = useRegisterStore((state) => state.registers)
 
-  const file = useMemo(
-    () => generateHeaderFile(params, registers),
-    [params, registers]
-  )
+  // A map the generator refuses is reported here rather than thrown at the
+  // error boundary, the same way the RTL view reports it.
+  const { file, error } = useMemo(() => {
+    try {
+      return { file: generateHeaderFile(params, registers), error: null }
+    } catch (cause) {
+      return {
+        file: null,
+        error: cause instanceof Error ? cause.message : 'Failed to generate header',
+      }
+    }
+  }, [params, registers])
 
-  const lines = useMemo(() => file.content.split('\n'), [file])
+  const lines = useMemo(() => (file ? file.content.split('\n') : []), [file])
   const count = Object.keys(registers).length
+
+  if (error) {
+    return (
+      <div className='m-4 flex flex-1 flex-col overflow-hidden rounded-lg border'>
+        <div className='rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300'>
+          {error}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className='m-4 flex flex-1 flex-col overflow-hidden rounded-lg border'>

@@ -75,6 +75,67 @@ const fieldComment = (desc) =>
  * instance index instead of a constant. The field shifts and masks are the
  * same for every instance and are emitted once.
  */
+/** Suffixes the field macros already use, which an enumerant cannot reuse. */
+const RESERVED_ENUM_NAMES = ['SHIFT', 'MASK', 'RESET']
+
+/**
+ * The named values a field can hold. The map carries them so the header, and
+ * anything else generated from it, can state them instead of leaving software
+ * to copy the numbers out of a description and drift from them.
+ */
+const enumLines = (prefix, regName, fieldName, field, width) => {
+  const values = field?.enumValues ?? []
+
+  if (values.length === 0) {
+    return []
+  }
+
+  const limit = 2 ** width - 1
+  const seen = new Set()
+  const codes = new Set()
+  const out = []
+
+  for (const entry of values) {
+    const name = sanitizeMacro(entry?.name ?? '')
+    const value = Number(entry?.value ?? 0)
+
+    if (RESERVED_ENUM_NAMES.includes(name)) {
+      throw new Error(
+        `${regName}.${field.name}: '${name}' is already a field macro suffix`
+      )
+    }
+
+    if (seen.has(name)) {
+      throw new Error(`${regName}.${field.name}: duplicate value name '${name}'`)
+    }
+    seen.add(name)
+
+    if (!Number.isInteger(value) || value < 0 || value > limit) {
+      throw new Error(
+        `${regName}.${field.name}: value ${entry?.value} for '${name}' does not fit ${width} bit(s)`
+      )
+    }
+
+    // Two names for one code is a typo far more often than it is deliberate,
+    // and the field cannot hold more codes than its width allows either way.
+    if (codes.has(value)) {
+      throw new Error(
+        `${regName}.${field.name}: '${name}' repeats the code ${value}`
+      )
+    }
+    codes.add(value)
+
+    const desc = String(entry?.desc ?? '').trim()
+
+    out.push(
+      `#define ${prefix}_${regName}_${fieldName}_${name} 0x${value.toString(16).toUpperCase()}u` +
+        (desc ? `   /* ${desc.split('\n')[0]} */` : '')
+    )
+  }
+
+  return out
+}
+
 /**
  * An array count is either a literal or the name of a declared parameter. The
  * header needs a number for the span even when the map carries the name.
@@ -183,7 +244,8 @@ export const generateCHeader = (params = {}, registerMap = {}) => {
           `0x${mask.toString(16).toUpperCase().padStart(8, '0')}u   ` +
           `/* [${msb}:${lsb}] ${field?.type ?? ''}, reset 0x${reset.toString(16).toUpperCase()} */`,
         // The field's own reset, unshifted, so it pairs with _PUT.
-        `#define ${prefix}_${name}_${fieldName}_RESET 0x${reset.toString(16).toUpperCase()}u`
+        `#define ${prefix}_${name}_${fieldName}_RESET 0x${reset.toString(16).toUpperCase()}u`,
+        ...enumLines(prefix, name, fieldName, field, width)
       )
 
       resetWord |= (BigInt(reset) << BigInt(lsb)) & mask
