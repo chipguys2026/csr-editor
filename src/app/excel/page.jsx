@@ -36,6 +36,7 @@ const ExcelPage = () => {
 
   return (
     <ViewShell
+      layoutKey='excelSidebar'
       sidebarTitle='Sheets'
       sidebarSubtitle={`${sheets.length} sheet(s) in ${moduleName}.xlsx`}
       sidebar={sheets.map((sheet) => (
@@ -125,13 +126,13 @@ const ExcelPage = () => {
                         <td className={`px-3 py-2 border font-mono ${row.isRegisterRow ? 'font-bold' : ''}`}>
                           {row.address}
                         </td>
-                        <td className={`px-3 py-2 border ${row.isRegisterRow ? 'font-bold' : ''}`}>
+                        <td className={`px-3 py-2 border font-mono ${row.isRegisterRow ? 'font-bold' : ''}`}>
                           {row.registerName}
                         </td>
-                        <td className='px-3 py-2 border'>{row.fieldName}</td>
+                        <td className='px-3 py-2 border font-mono'>{row.fieldName}</td>
                         <td className='px-3 py-2 border font-mono'>{row.bitRange}</td>
                         <td className='px-3 py-2 border text-right'>{row.width}</td>
-                        <td className='px-3 py-2 border text-center'>{row.type}</td>
+                        <td className='px-3 py-2 border text-center font-mono'>{row.type}</td>
                         <td className='px-3 py-2 border text-right font-mono'>{row.resetValue}</td>
                         {/* The sheet wraps this column, so the preview has to
                             keep the line breaks rather than collapse them. */}
@@ -173,13 +174,13 @@ const ExcelPage = () => {
                         <td className={`border px-3 py-2 font-mono ${row.isRegisterRow ? 'font-bold' : ''}`}>
                           {row.address}
                         </td>
-                        <td className={`border px-3 py-2 ${row.isRegisterRow ? 'font-bold' : ''}`}>
+                        <td className={`border px-3 py-2 font-mono ${row.isRegisterRow ? 'font-bold' : ''}`}>
                           {row.registerName}
                         </td>
-                        <td className='border px-3 py-2'>{row.fieldName}</td>
+                        <td className='border px-3 py-2 font-mono'>{row.fieldName}</td>
                         <td className='border px-3 py-2 font-mono'>{row.bitRange}</td>
                         <td className='border px-3 py-2 text-right'>{row.width}</td>
-                        <td className='border px-3 py-2 text-center'>{row.type}</td>
+                        <td className='border px-3 py-2 text-center font-mono'>{row.type}</td>
                         <td className='border px-3 py-2 text-right font-mono'>{row.resetValue}</td>
                         <td
                           className={`border px-3 py-2 align-top whitespace-pre-wrap ${row.isRegisterRow ? 'italic' : ''}`}

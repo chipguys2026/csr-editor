@@ -1,7 +1,11 @@
 import packageInfo from '../../package.json'
 import { paramsSchema } from '@/schemas/params-schema'
 import { useCurrentRegisterStore } from '@/store/current-register-store'
-import { parseLayout, useLayoutStore } from '@/store/layout-store'
+import {
+  parseLayout,
+  SIDEBAR_KEYS,
+  useLayoutStore,
+} from '@/store/layout-store'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 
@@ -37,7 +41,7 @@ const documentOf = () => {
     registeredReadback,
     sdcTarget,
   } = useParamStore.getState()
-  const { viewSidebar, editorSidebar } = useLayoutStore.getState()
+  const layout = useLayoutStore.getState()
 
   return {
     params: {
@@ -53,10 +57,9 @@ const documentOf = () => {
     registers: useRegisterStore.getState().registers,
     // How the document was laid out when saved, so it opens the same way.
     // Rounded: a tenth of a percent is finer than a drag can place it.
-    layout: {
-      viewSidebar: Math.round(viewSidebar * 10) / 10,
-      editorSidebar: Math.round(editorSidebar * 10) / 10,
-    },
+    layout: Object.fromEntries(
+      SIDEBAR_KEYS.map((key) => [key, Math.round(layout[key] * 10) / 10])
+    ),
   }
 }
 

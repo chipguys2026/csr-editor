@@ -100,6 +100,7 @@ const HeaderPage = () => {
 
   return (
     <ViewShell
+      layoutKey='headerSidebar'
       error={error}
       sidebarTitle='Files'
       sidebarSubtitle='1 generated file(s)'

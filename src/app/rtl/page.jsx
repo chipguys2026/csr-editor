@@ -146,6 +146,7 @@ const RTLPage = () => {
 
   return (
     <ViewShell
+      layoutKey='rtlSidebar'
       error={error}
       sidebarTitle='Files'
       sidebarSubtitle={`${files.length} generated file(s)`}

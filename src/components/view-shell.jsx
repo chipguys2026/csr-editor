@@ -42,6 +42,7 @@ export const SidebarItem = ({
 }
 
 export const ViewShell = ({
+  layoutKey,
   error,
   sidebarTitle,
   sidebarSubtitle,
@@ -52,7 +53,7 @@ export const ViewShell = ({
   actions,
   children,
 }) => {
-  const sidebarSize = useSidebarSize('viewSidebar')
+  const sidebarSize = useSidebarSize(layoutKey)
 
   return (
     <div className='flex flex-1 flex-col gap-4 overflow-auto p-4'>
@@ -62,8 +63,7 @@ export const ViewShell = ({
         </div>
       ) : (
         <section className='bg-card flex min-h-0 flex-1 overflow-hidden rounded-lg border'>
-          {/* One width for every view's sidebar, saved with the document, so
-            switching views does not move the line the content starts on. */}
+          {/* Each view keeps its own sidebar width, saved with the document. */}
           <ResizablePanelGroup direction='horizontal'>
             <ResizablePanel
               {...sidebarSize}
@@ -71,9 +71,11 @@ export const ViewShell = ({
               maxSize={45}
             >
               <aside className='flex h-full flex-col'>
-                <div className='border-b px-4 py-3'>
-                  <p className='text-sm font-medium'>{sidebarTitle}</p>
-                  <p className='text-muted-foreground text-xs'>
+                {/* Fixed at the title bar's height, so the two lines under
+                  them meet across the resize handle. */}
+                <div className='flex h-16 shrink-0 flex-col justify-center border-b px-4'>
+                  <p className='truncate text-sm font-medium'>{sidebarTitle}</p>
+                  <p className='text-muted-foreground truncate text-xs'>
                     {sidebarSubtitle}
                   </p>
                 </div>
@@ -91,17 +93,17 @@ export const ViewShell = ({
 
             <ResizablePanel defaultSize={100 - sidebarSize.defaultSize}>
               <div className='flex h-full min-w-0 flex-col'>
-                <div className='flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3'>
-                  <div className='min-w-0'>
+                <div className='flex h-16 shrink-0 items-center justify-between gap-3 border-b px-4'>
+                  <div className='min-w-0 flex-1'>
                     <h3 className='truncate font-medium'>{title}</h3>
                     {subtitle && (
-                      <p className='text-muted-foreground text-xs'>
+                      <p className='text-muted-foreground truncate text-xs'>
                         {subtitle}
                       </p>
                     )}
                   </div>
 
-                  <div className='flex flex-wrap items-center gap-2'>
+                  <div className='flex shrink-0 items-center gap-2'>
                     {actions}
                   </div>
                 </div>

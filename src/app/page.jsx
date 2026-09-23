@@ -45,10 +45,13 @@ const HomePage = () => {
             <Accordion
               type='single'
               collapsible
-              className='w-full'
+              className='flex h-full w-full flex-col'
               defaultValue='param-panel'
             >
-              <AccordionItem value='param-panel'>
+              <AccordionItem
+                value='param-panel'
+                className='shrink-0'
+              >
                 <AccordionTrigger className='px-4 py-3 text-sm font-medium hover:no-underline'>
                   Parameters
                 </AccordionTrigger>
@@ -57,11 +60,16 @@ const HomePage = () => {
                 </AccordionContent>
               </AccordionItem>
 
-              <AccordionItem value='register-map'>
+              {/* Open, the map takes the rest of the sidebar's height, down to
+                the bottom of the window, and its list scrolls within it. */}
+              <AccordionItem
+                value='register-map'
+                className='flex shrink-0 flex-col data-[state=open]:min-h-0 data-[state=open]:flex-1 data-[state=open]:[&>[data-slot=accordion-content]]:flex data-[state=open]:[&>[data-slot=accordion-content]]:min-h-0 data-[state=open]:[&>[data-slot=accordion-content]]:flex-1 data-[state=open]:[&>[data-slot=accordion-content]]:flex-col'
+              >
                 <AccordionTrigger className='px-4 py-3 text-sm font-medium hover:no-underline'>
                   Register Map
                 </AccordionTrigger>
-                <AccordionContent className='flex flex-col gap-4 p-4'>
+                <AccordionContent className='flex min-h-0 flex-1 flex-col gap-4 p-4'>
                   <RegisterMap />
                 </AccordionContent>
               </AccordionItem>

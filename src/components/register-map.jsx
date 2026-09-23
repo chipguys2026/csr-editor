@@ -123,7 +123,7 @@ export const RegisterItem = ({
               : undefined
         }
       >
-        <span className='truncate'>
+        <span className='truncate font-mono text-sm'>
           {reg?.name ?? `${instance.name}[${instance.index}]`}
         </span>
 
@@ -261,7 +261,7 @@ export const RegisterDragOverlay = ({ addr, addrWidth, reg }) => {
       <span className='text-muted-foreground cursor-grabbing font-mono text-sm whitespace-nowrap'>
         {hex(addr, addrWidth)}
       </span>
-      <div className='flex h-full grow items-center border p-2'>
+      <div className='flex h-full grow items-center border p-2 font-mono text-sm'>
         {reg?.name ?? 'Reserved'}
       </div>
     </div>
@@ -607,7 +607,7 @@ export const RegisterMap = () => {
 
       <div
         ref={parentRef}
-        className='h-120 overflow-auto'
+        className='min-h-40 flex-1 overflow-auto'
       >
         <div
           className='relative'

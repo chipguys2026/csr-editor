@@ -292,7 +292,12 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
   if (!isEditing) {
     return (
       <div className='flex items-center justify-center gap-1'>
-        <Badge variant='outline'>{field.type}</Badge>
+        <Badge
+          variant='outline'
+          className='font-mono'
+        >
+          {field.type}
+        </Badge>
 
         {field.type === 'W1SC' && (
           <Badge
@@ -326,7 +331,7 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
         data-row={field.trueIndex}
         data-col='type'
         data-size='none'
-        className={cn('h-6 gap-0.5 px-1 py-0')}
+        className={cn('h-6 gap-0.5 px-1 py-0 font-mono')}
       >
         <SelectValue />
       </SelectTrigger>
@@ -337,6 +342,7 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
             key={type.value}
             value={type.value}
             title={type.description}
+            className='font-mono'
           >
             {type.value}
           </SelectItem>
@@ -1479,7 +1485,7 @@ export const RegisterDetail = () => {
                     <>
                       <TableCell />
 
-                      <TableCell className='align-top font-medium'>
+                      <TableCell className='align-top font-mono font-medium'>
                         {field.name}
                       </TableCell>
 
@@ -1491,7 +1497,12 @@ export const RegisterDetail = () => {
                       </TableCell>
 
                       <TableCell className='text-center align-top'>
-                        <Badge variant='outline'>{field.type}</Badge>
+                        <Badge
+                          variant='outline'
+                          className='font-mono'
+                        >
+                          {field.type}
+                        </Badge>
                       </TableCell>
 
                       <TableCell />
@@ -1546,7 +1557,7 @@ export const RegisterDetail = () => {
                         )}
                       </TableCell>
 
-                      <TableCell className='align-top font-medium'>
+                      <TableCell className='align-top font-mono font-medium'>
                         <FieldName
                           field={field}
                           isEditing={isEditing}

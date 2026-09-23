@@ -104,6 +104,7 @@ const SDCPage = () => {
 
   return (
     <ViewShell
+      layoutKey='sdcSidebar'
       error={error}
       sidebarTitle='Files'
       sidebarSubtitle='1 generated file(s)'

@@ -135,12 +135,12 @@ const ContentsList = ({ entries, activeId }) =>
         entry.register && 'py-1.5 pl-6 font-mono'
       )}
     >
-      <span className='truncate'>{entry.label}</span>
+      {/* The address leads, so the registers read down the list in the
+          order they sit in the map. */}
       {entry.detail && (
-        <span className='text-muted-foreground ml-auto shrink-0'>
-          {entry.detail}
-        </span>
+        <span className='text-muted-foreground shrink-0'>{entry.detail}</span>
       )}
+      <span className='truncate'>{entry.label}</span>
     </SidebarItem>
   ))
 
@@ -256,6 +256,7 @@ const DocumentPage = () => {
 
   return (
     <ViewShell
+      layoutKey='documentSidebar'
       sidebarTitle='Contents'
       sidebarSubtitle={`${doc.registers.length} register(s)`}
       sidebarRef={sidebarRef}
