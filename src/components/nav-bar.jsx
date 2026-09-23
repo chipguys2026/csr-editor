@@ -3,21 +3,23 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 import useTheme from '@/hooks/use-theme'
 
-import { Sun, Moon, SunMoon } from 'lucide-react'
-
 import {
-  Menubar,
-  MenubarContent,
-  MenubarItem,
-  MenubarMenu,
-  MenubarRadioGroup,
-  MenubarRadioItem,
-  MenubarSeparator,
-  MenubarSub,
-  MenubarSubContent,
-  MenubarSubTrigger,
-  MenubarTrigger,
-} from '@/components/ui/menubar'
+  Braces,
+  Cpu,
+  FilePlus,
+  FileSpreadsheet,
+  FileText,
+  FolderOpen,
+  Info,
+  Moon,
+  Save,
+  SquarePen,
+  Sun,
+  SunMoon,
+  Timer,
+} from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -28,11 +30,21 @@ import {
 
 import packageInfo from '../../package.json'
 import { paramsSchema } from '@/schemas/params-schema'
-import { exportRegisterPdf } from '@/lib/pdf-export'
+import { cn } from '@/lib/utils'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { useCurrentRegisterStore } from '@/store/current-register-store'
 import { toast } from 'sonner'
+
+/** Theme button: each press moves to the next, and shows where it is now. */
+const THEMES = [
+  { value: 'light', label: 'Light', Icon: Sun },
+  { value: 'dark', label: 'Dark', Icon: Moon },
+  { value: 'system', label: 'System', Icon: SunMoon },
+]
+
+/** A thin upright rule between toolbar groups. */
+const Divider = () => <div className='bg-border mx-1 h-5 w-px shrink-0' />
 
 const downloadJson = (filename, data) => {
   const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -70,18 +82,31 @@ export const NavBar = () => {
   )
   const fileInputRef = useRef(null)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
+  // The file the document came from, and is saved back as. Left empty it
+  // falls back to the module name, which is what a new document is saved as.
+  const [fileName, setFileName] = useState('')
   // Grouped by who reads them: the editor, the documentation, the
-  // generated sources. The menu draws a separator between groups.
+  // generated sources. The toolbar draws a divider between groups.
   const viewGroups = [
-    [{ label: 'Editor', value: 'editor', path: '/' }],
+    [{ label: 'Editor', value: 'editor', path: '/', Icon: SquarePen }],
     [
-      { label: 'Document', value: 'document', path: '/document' },
-      { label: 'Excel', value: 'excel', path: '/excel' },
+      {
+        label: 'Document',
+        value: 'document',
+        path: '/document',
+        Icon: FileText,
+      },
+      {
+        label: 'Excel',
+        value: 'excel',
+        path: '/excel',
+        Icon: FileSpreadsheet,
+      },
     ],
     [
-      { label: 'RTL', value: 'rtl', path: '/rtl' },
-      { label: 'SDC', value: 'sdc', path: '/sdc' },
-      { label: 'C Header', value: 'header', path: '/header' },
+      { label: 'RTL', value: 'rtl', path: '/rtl', Icon: Cpu },
+      { label: 'SDC', value: 'sdc', path: '/sdc', Icon: Timer },
+      { label: 'C Header', value: 'header', path: '/header', Icon: Braces },
     ],
   ]
   const viewRoutes = viewGroups.flat()
@@ -93,6 +118,7 @@ export const NavBar = () => {
     setParams(paramsSchema.parse({}))
     setRegisters({})
     setCurrentRegister(null)
+    setFileName('')
     navigate('/')
     toast.success('Created a new CSR document')
   }
@@ -119,7 +145,8 @@ export const NavBar = () => {
       registers,
     }
 
-    downloadJson(`${moduleName}.json`, payload)
+    const name = fileName.trim() || `${moduleName}.json`
+    downloadJson(/\.json$/i.test(name) ? name : `${name}.json`, payload)
   }
 
   const onOpenJson = () => {
@@ -155,6 +182,7 @@ export const NavBar = () => {
 
       setParams(nextParams)
       setRegisters(importedRegisters)
+      setFileName(file.name)
 
       const addrKeys = Object.keys(importedRegisters)
       const firstAddr = addrKeys.length
@@ -174,28 +202,17 @@ export const NavBar = () => {
     }
   }
 
-  const onExportExcel = () => {
-    navigate('/excel')
-    toast.success('Opened Excel preview')
-  }
-
-  const onExportPdf = async () => {
-    try {
-      const filename = await exportRegisterPdf(
-        useParamStore.getState(),
-        registers
-      )
-      toast.success(`Downloaded ${filename}`)
-    } catch (error) {
-      console.error(error)
-      toast.error('Failed to export PDF')
-    }
-  }
+  const themeIndex = Math.max(
+    0,
+    THEMES.findIndex((entry) => entry.value === theme)
+  )
+  const { Icon: ThemeIcon, label: themeLabel } = THEMES[themeIndex]
+  const nextTheme = THEMES[(themeIndex + 1) % THEMES.length]
 
   return (
     <>
-      <nav className='flex flex-row items-center gap-4 border-b p-2'>
-        <h1 className='font-bold'>CSR Editor</h1>
+      <nav className='flex flex-row items-center gap-1 border-b p-2'>
+        <h1 className='mr-3 font-bold whitespace-nowrap'>CSR Editor</h1>
         <input
           ref={fileInputRef}
           type='file'
@@ -204,77 +221,91 @@ export const NavBar = () => {
           onChange={onFileChange}
         />
 
-        <Menubar className='border-0'>
-          <MenubarMenu>
-            <MenubarTrigger>File</MenubarTrigger>
-            <MenubarContent>
-              <MenubarItem onClick={onNewJson}>New</MenubarItem>
-              <MenubarSeparator />
-              <MenubarItem onClick={onOpenJson}>Open JSON</MenubarItem>
-              <MenubarItem onClick={onSaveJson}>Save JSON</MenubarItem>
-              <MenubarSeparator />
-              <MenubarItem onClick={onExportExcel}>Export Excel</MenubarItem>
-              <MenubarItem onClick={onExportPdf}>Export PDF</MenubarItem>
-            </MenubarContent>
-          </MenubarMenu>
+        <Button
+          variant='ghost'
+          size='sm'
+          onClick={onNewJson}
+          title='Start a new document'
+        >
+          <FilePlus />
+          New
+        </Button>
+        <Button
+          variant='ghost'
+          size='sm'
+          onClick={onOpenJson}
+          title='Open a document from a JSON file'
+        >
+          <FolderOpen />
+          Open
+        </Button>
+        <Button
+          variant='ghost'
+          size='sm'
+          onClick={onSaveJson}
+          title='Save the document as JSON'
+        >
+          <Save />
+          Save
+        </Button>
 
-          <MenubarMenu>
-            <MenubarTrigger>View</MenubarTrigger>
-            <MenubarContent>
-              <MenubarRadioGroup
-                value={currentView}
-                onValueChange={(value) => {
-                  const next = viewRoutes.find((route) => route.value === value)
-                  if (next) navigate(next.path)
-                }}
+        <Divider />
+
+        <input
+          value={fileName}
+          onChange={(event) => setFileName(event.target.value)}
+          placeholder={`${moduleName}.json`}
+          aria-label='File name'
+          title='Saved under this name'
+          spellCheck={false}
+          className='hover:border-input focus:border-input focus:ring-ring/50 h-8 min-w-24 flex-1 rounded-md border border-transparent bg-transparent px-2 font-mono text-sm outline-none focus:ring-[3px]'
+        />
+
+        <Divider />
+
+        {viewGroups.map((group, index) => (
+          <Fragment key={group[0].value}>
+            {index > 0 && <Divider />}
+            {group.map((route) => (
+              <Button
+                key={route.value}
+                variant={route.value === currentView ? 'secondary' : 'ghost'}
+                size='sm'
+                aria-current={route.value === currentView ? 'page' : undefined}
+                className={cn(
+                  route.value !== currentView && 'text-muted-foreground'
+                )}
+                onClick={() => navigate(route.path)}
+                title={route.label}
               >
-                {viewGroups.map((group, index) => (
-                  <Fragment key={group[0].value}>
-                    {index > 0 && <MenubarSeparator />}
-                    {group.map((route) => (
-                      <MenubarRadioItem
-                        key={route.value}
-                        value={route.value}
-                      >
-                        {route.label}
-                      </MenubarRadioItem>
-                    ))}
-                  </Fragment>
-                ))}
-              </MenubarRadioGroup>
-              <MenubarSeparator />
-              <MenubarSub>
-                <MenubarSubTrigger>Theme</MenubarSubTrigger>
-                <MenubarSubContent>
-                  <MenubarRadioGroup
-                    value={theme}
-                    onValueChange={(value) => setTheme(value)}
-                  >
-                    <MenubarRadioItem value='light'>
-                      <Sun className='h-4 w-4' />
-                      Light
-                    </MenubarRadioItem>
-                    <MenubarRadioItem value='dark'>
-                      <Moon className='h-4 w-4' />
-                      Dark
-                    </MenubarRadioItem>
-                    <MenubarRadioItem value='system'>
-                      <SunMoon className='h-4 w-4' />
-                      System
-                    </MenubarRadioItem>
-                  </MenubarRadioGroup>
-                </MenubarSubContent>
-              </MenubarSub>
-            </MenubarContent>
-          </MenubarMenu>
+                <route.Icon />
+                {/* Icons alone on a narrower window, so the row still fits. */}
+                <span className='hidden xl:inline'>{route.label}</span>
+              </Button>
+            ))}
+          </Fragment>
+        ))}
 
-          <MenubarMenu>
-            <MenubarTrigger>Help</MenubarTrigger>
-            <MenubarContent>
-              <MenubarItem onClick={() => setIsAboutOpen(true)}>About</MenubarItem>
-            </MenubarContent>
-          </MenubarMenu>
-        </Menubar>
+        <Divider />
+
+        <Button
+          variant='ghost'
+          size='icon-sm'
+          onClick={() => setTheme(nextTheme.value)}
+          title={`Theme: ${themeLabel} (click for ${nextTheme.label})`}
+          aria-label={`Theme: ${themeLabel}`}
+        >
+          <ThemeIcon />
+        </Button>
+        <Button
+          variant='ghost'
+          size='icon-sm'
+          onClick={() => setIsAboutOpen(true)}
+          title='About'
+          aria-label='About'
+        >
+          <Info />
+        </Button>
       </nav>
 
       <Dialog
