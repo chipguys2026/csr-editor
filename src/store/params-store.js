@@ -8,6 +8,7 @@ export const useParamStore = create((set) => ({
   parameters: [],
   headerPrefix: '',
   registeredReadback: false,
+  sdcTarget: 'synopsys',
 
   setParams: (params) => set(params),
 }))

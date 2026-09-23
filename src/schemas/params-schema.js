@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 const isPowerOfTwo = (value) => (value & (value - 1)) === 0
 export const interfaceOptions = ['Native', 'AvalonMM', 'AXI4Lite']
+export const sdcTargetOptions = ['synopsys', 'quartus']
 const identifierPattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /** Parameter names the generator always emits itself. */
@@ -68,6 +69,10 @@ export const paramsSchema = z.object({
   // Register the readback mux output. Costs one cycle of read latency and
   // shortens the path from the field flops to whatever consumes csr_rdata_o.
   registeredReadback: z.boolean().default(false),
+
+  // Which toolchain the generated SDC is spelled for. It decides the hierarchy
+  // separator and how a flop is named and found, none of which are portable.
+  sdcTarget: z.enum(sdcTargetOptions).default('synopsys'),
 })
 
 export const createParameter = (parameters = []) => {

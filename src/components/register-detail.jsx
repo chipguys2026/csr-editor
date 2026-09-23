@@ -14,7 +14,7 @@ import {
   resolveFields,
   resolveWidth,
 } from '@/lib/register'
-import { accessTypes, holdCyclesOf } from '@/lib/access-types'
+import { accessTypes, holdCyclesOf, quasiStaticBlocker } from '@/lib/access-types'
 import { buildAddressMap } from '@/lib/address-map'
 import { deleteRegister } from '@/lib/delete-register'
 import { cn } from '@/lib/utils'
@@ -311,7 +311,16 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
     <div className='flex items-center gap-1'>
       <Select
       value={value}
-      onValueChange={(v) => setValue(path, v, { shouldDirty: true })}
+      onValueChange={(v) => {
+        setValue(path, v, { shouldDirty: true })
+
+        // Retyping a held field into a strobe must not carry its tick over.
+        if (quasiStaticBlocker(v)) {
+          setValue(`fields.${field.trueIndex}.quasiStatic`, false, {
+            shouldDirty: true,
+          })
+        }
+      }}
     >
       <SelectTrigger
         data-row={field.trueIndex}
@@ -357,6 +366,50 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * Marks a field as quasi-static: written before the logic it configures is
+ * running, and held still afterwards. Ticked, the SDC view cuts timing on it
+ * with set_false_path, out of the field flop for what the block drives and
+ * into the port pin for what it samples.
+ *
+ * It is a claim about the value, not a way to quieten a report: a field that
+ * moves while something is reading it can be caught half-updated, and no
+ * exception here makes that safe.
+ */
+const FieldQuasiStatic = ({ field, isEditing, watch, setValue }) => {
+  const path = `fields.${field.trueIndex}.quasiStatic`
+  const blocker = quasiStaticBlocker(field.type)
+
+  // A dash rather than an unticked box: an empty checkbox reads as "not set
+  // yet", which would invite clicking at the one thing that must not be.
+  if (blocker) {
+    return (
+      <span
+        className='text-muted-foreground'
+        title={`Not available on ${field.type}: ${blocker}`}
+      >
+        &ndash;
+      </span>
+    )
+  }
+
+  return (
+    <input
+      type='checkbox'
+      checked={Boolean(watch(path))}
+      disabled={!isEditing}
+      data-row={field.trueIndex}
+      data-col='quasiStatic'
+      title='Held still during operation: cut it in the generated SDC (set_false_path)'
+      onChange={(event) =>
+        setValue(path, event.target.checked, { shouldDirty: true })
+      }
+      // Ticks stay legible in view mode; the cursor is what says it is locked.
+      className='disabled:cursor-default disabled:opacity-100'
+    />
   )
 }
 
@@ -1364,6 +1417,12 @@ export const RegisterDetail = () => {
                 Type
               </TableHead>
               <TableHead
+                className='w-28 text-center'
+                title='Held still during operation: cut it in the generated SDC (set_false_path)'
+              >
+                Quasistatic
+              </TableHead>
+              <TableHead
                 className='text-right font-mono'
                 style={{ width: `calc(${resetColumnChars}ch + 2rem)` }}
               >
@@ -1434,6 +1493,8 @@ export const RegisterDetail = () => {
                       <TableCell className='text-center align-top'>
                         <Badge variant='outline'>{field.type}</Badge>
                       </TableCell>
+
+                      <TableCell />
 
                       <TableCell className='text-right align-top font-mono'>
                         {hex(
@@ -1515,6 +1576,15 @@ export const RegisterDetail = () => {
                             watch={watch}
                           />
                         </div>
+                      </TableCell>
+
+                      <TableCell className='text-center align-top'>
+                        <FieldQuasiStatic
+                          field={field}
+                          isEditing={isEditing}
+                          watch={watch}
+                          setValue={setValue}
+                        />
                       </TableCell>
 
                       <TableCell className='text-right align-top font-mono'>

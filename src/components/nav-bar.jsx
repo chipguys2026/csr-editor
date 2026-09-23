@@ -57,6 +57,9 @@ export const NavBar = () => {
     interface: csrInterface,
     moduleName,
     parameters,
+    headerPrefix,
+    registeredReadback,
+    sdcTarget,
   } = useParamStore()
   const registers = useRegisterStore((state) => state.registers)
   const setParams = useParamStore((state) => state.setParams)
@@ -101,6 +104,9 @@ export const NavBar = () => {
         interface: csrInterface,
         moduleName,
         parameters,
+        headerPrefix,
+        registeredReadback,
+        sdcTarget,
       },
       registers,
     }
@@ -126,12 +132,17 @@ export const NavBar = () => {
         throw new Error('Invalid JSON shape')
       }
 
+      // Anything the file predates falls back to the schema default rather
+      // than to undefined, so an older document still opens.
       const nextParams = paramsSchema.parse({
         dataWidth: Number(params.dataWidth),
         addrWidth: Number(params.addrWidth),
         interface: params.interface ?? 'Native',
         moduleName: params.moduleName ?? 'CSR',
         parameters: params.parameters ?? [],
+        headerPrefix: params.headerPrefix ?? '',
+        registeredReadback: Boolean(params.registeredReadback),
+        sdcTarget: params.sdcTarget ?? 'synopsys',
       })
 
       setParams(nextParams)
@@ -273,6 +284,10 @@ export const NavBar = () => {
                   <li>Import and export project JSON files</li>
                   <li>Generate native or Avalon-MM RTL</li>
                   <li>Preview generated SystemVerilog in the RTL viewer</li>
+                  <li>
+                    Mark the quasi-static fields and generate the SDC that cuts
+                    their timing
+                  </li>
                   <li>Download the active RTL file or all generated outputs</li>
                 </ul>
               </div>

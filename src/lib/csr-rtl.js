@@ -501,7 +501,12 @@ const registerFootprint = (reg) => {
   return addresses
 }
 
-const buildRegisterModel = (params = {}, registerMap = {}) => {
+/**
+ * The validated, name-resolved view of a document that the generators render
+ * from. Exported so the SDC generator constrains exactly the port names the
+ * RTL declares.
+ */
+export const buildRegisterModel = (params = {}, registerMap = {}) => {
   const dataWidth = Number(params.dataWidth ?? 32)
   const addrWidth = Number(params.addrWidth ?? 16)
   const csrInterface = params.interface ?? NATIVE_INTERFACE
@@ -549,6 +554,9 @@ const buildRegisterModel = (params = {}, registerMap = {}) => {
         // 'bitmask' names a bit of the field rather than a value of it: the
         // field then holds any combination of them at once.
         valueKind: field?.valueKind === 'bitmask' ? 'bitmask' : 'code',
+        // Held still during operation, so the SDC generator cuts timing on it.
+        // Carries no weight in the RTL itself.
+        quasiStatic: Boolean(field?.quasiStatic),
         // Named values the field can hold, emitted as localparams so the RTL
         // can be read against the same names software uses.
         enumValues: (field?.enumValues ?? []).map((entry) => ({

@@ -38,6 +38,7 @@ const sameParams = (a, b) =>
   a.moduleName === b.moduleName &&
   (a.headerPrefix ?? '') === (b.headerPrefix ?? '') &&
   Boolean(a.registeredReadback) === Boolean(b.registeredReadback) &&
+  (a.sdcTarget ?? 'synopsys') === (b.sdcTarget ?? 'synopsys') &&
   JSON.stringify(a.parameters ?? []) === JSON.stringify(b.parameters ?? [])
 
 export const ParamPanel = () => {
@@ -49,6 +50,7 @@ export const ParamPanel = () => {
     parameters,
     headerPrefix,
     registeredReadback,
+    sdcTarget,
     setParams,
   } = useParamStore()
 
@@ -63,6 +65,9 @@ export const ParamPanel = () => {
       parameters: parameters ?? [],
       headerPrefix: headerPrefix ?? '',
       registeredReadback: Boolean(registeredReadback),
+      // No control here: it is chosen in the SDC view, and only carried so a
+      // change to any other parameter does not parse it back to the default.
+      sdcTarget: sdcTarget ?? 'synopsys',
     },
   })
 
@@ -75,6 +80,7 @@ export const ParamPanel = () => {
       parameters: parameters ?? [],
       headerPrefix: headerPrefix ?? '',
       registeredReadback: Boolean(registeredReadback),
+      sdcTarget: sdcTarget ?? 'synopsys',
     }
 
     if (sameParams(form.getValues(), nextValues)) {
@@ -91,6 +97,7 @@ export const ParamPanel = () => {
     parameters,
     headerPrefix,
     registeredReadback,
+    sdcTarget,
   ])
 
   const commitParamChange = (name, value) => {
@@ -117,6 +124,7 @@ export const ParamPanel = () => {
         parameters,
         headerPrefix,
         registeredReadback,
+        sdcTarget,
       })
     ) {
       return

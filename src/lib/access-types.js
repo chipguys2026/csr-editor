@@ -61,6 +61,36 @@ export const accessTypes = [
   },
 ]
 
+/**
+ * Why a field of this access type cannot be called quasi-static, or null when
+ * it can. Only the types software writes and then leaves alone qualify.
+ *
+ * The pulses are the ones that matter: a false path tells the tool nothing
+ * about arrival, so a one-cycle strobe can reach its consumer late or not at
+ * all, and no timing report will say so. A status bit hardware drives is
+ * simply moving, which is the opposite of the claim.
+ */
+export const quasiStaticBlocker = (access) => {
+  switch (access) {
+    case 'RW':
+    case 'WO':
+      return null
+    case 'RO':
+      return 'driven from outside - no field flop to cut'
+    case 'W1C':
+    case 'W0C':
+      return 'set by hardware during operation, so it is not held still'
+    case 'W1S':
+      return 'cleared by hardware during operation, so it is not held still'
+    case 'W1P':
+      return 'a one-cycle strobe - it has to stay timed'
+    case 'W1SC':
+      return 'a timed pulse - it has to stay timed'
+    default:
+      return 'not a type that holds a value'
+  }
+}
+
 export const accessTypeValues = accessTypes.map((type) => type.value)
 
 export const accessTypeMap = Object.fromEntries(
