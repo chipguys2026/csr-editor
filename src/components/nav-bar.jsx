@@ -2,6 +2,7 @@ import { Fragment, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import useTheme from '@/hooks/use-theme'
+import useAutosave from '@/hooks/use-autosave'
 
 import {
   Braces,
@@ -31,9 +32,21 @@ import {
 import packageInfo from '../../package.json'
 import { paramsSchema } from '@/schemas/params-schema'
 import { cn } from '@/lib/utils'
+import {
+  applyProject,
+  canLinkFiles,
+  documentKey,
+  downloadProject,
+  pickFileToOpen,
+  pickFileToSave,
+  requestWriteAccess,
+  serializeProject,
+  writeToHandle,
+} from '@/lib/project-file'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { useCurrentRegisterStore } from '@/store/current-register-store'
+import { useFileStore } from '@/store/file-store'
 import { toast } from 'sonner'
 
 /** Theme button: each press moves to the next, and shows where it is now. */
@@ -46,45 +59,35 @@ const THEMES = [
 /** A thin upright rule between toolbar groups. */
 const Divider = () => <div className='bg-border mx-1 h-5 w-px shrink-0' />
 
-const downloadJson = (filename, data) => {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: 'application/json',
-  })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+/** What the status beside the file name says, and how. */
+const SAVE_STATUS = {
+  pending: { label: 'Edited', className: 'text-muted-foreground' },
+  saving: { label: 'Saving…', className: 'text-muted-foreground' },
+  saved: { label: 'Saved', className: 'text-muted-foreground' },
+  error: { label: 'Save failed', className: 'text-red-600 dark:text-red-400' },
 }
+
+/** A file name as Save writes it: always ending in .json. */
+const asJsonName = (name) => (/\.json$/i.test(name) ? name : `${name}.json`)
 
 export const NavBar = () => {
   const { theme, setTheme } = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
-  const {
-    dataWidth,
-    addrWidth,
-    interface: csrInterface,
-    moduleName,
-    parameters,
-    headerPrefix,
-    registeredReadback,
-    sdcTarget,
-  } = useParamStore()
-  const registers = useRegisterStore((state) => state.registers)
+  const moduleName = useParamStore((state) => state.moduleName)
   const setParams = useParamStore((state) => state.setParams)
   const setRegisters = useRegisterStore((state) => state.setRegisters)
   const setCurrentRegister = useCurrentRegisterStore(
     (state) => state.setCurrentRegister
   )
   const fileInputRef = useRef(null)
+  const { handle, status, error: saveError, link, unlink } = useFileStore()
   const [isAboutOpen, setIsAboutOpen] = useState(false)
   // The file the document came from, and is saved back as. Left empty it
   // falls back to the module name, which is what a new document is saved as.
   const [fileName, setFileName] = useState('')
+
+  useAutosave()
   // Grouped by who reads them: the editor, the documentation, the
   // generated sources. The toolbar draws a divider between groups.
   const viewGroups = [
@@ -119,81 +122,84 @@ export const NavBar = () => {
     setRegisters({})
     setCurrentRegister(null)
     setFileName('')
+    // A new document is not the file that was open: stop writing to it.
+    unlink()
     navigate('/')
     toast.success('Created a new CSR document')
   }
 
-  const onSaveJson = () => {
-    const payload = {
-      metadata: {
-        tool: {
-          name: packageInfo.name,
-          version: packageInfo.version,
-        },
-        generatedAt: new Date().toISOString(),
-      },
-      params: {
-        dataWidth,
-        addrWidth,
-        interface: csrInterface,
-        moduleName,
-        parameters,
-        headerPrefix,
-        registeredReadback,
-        sdcTarget,
-      },
-      registers,
+  // Save writes to the linked file when the name still matches it. A new name,
+  // or no file yet, asks where to save - and links the document to it, so
+  // autosave takes over from there. Without file access it downloads a copy.
+  const onSaveJson = async () => {
+    const name = asJsonName(fileName.trim() || `${moduleName}.json`)
+
+    try {
+      if (handle && handle.name === name) {
+        useFileStore.getState().setStatus('saving')
+        await writeToHandle(handle, serializeProject())
+        useFileStore.getState().markSaved(documentKey())
+        toast.success(`Saved ${name}`)
+        return
+      }
+
+      if (!canLinkFiles) {
+        downloadProject(name, serializeProject())
+        return
+      }
+
+      const next = await pickFileToSave(name)
+      if (!next) return
+
+      await writeToHandle(next, serializeProject())
+      link(next, documentKey())
+      setFileName(next.name)
+      toast.success(`Saved ${next.name} - changes now save to it`)
+    } catch (error) {
+      console.error(error)
+      useFileStore.getState().setStatus('error', error?.message)
+      toast.error('Failed to save JSON')
+    }
+  }
+
+  const onOpenJson = async () => {
+    if (!canLinkFiles) {
+      fileInputRef.current?.click()
+      return
     }
 
-    const name = fileName.trim() || `${moduleName}.json`
-    downloadJson(/\.json$/i.test(name) ? name : `${name}.json`, payload)
+    try {
+      const next = await pickFileToOpen()
+      if (!next) return
+
+      // Asked straight after the pick, while the click still counts: the
+      // browser will not ask later, from an autosave.
+      const writable = await requestWriteAccess(next)
+
+      applyProject(await (await next.getFile()).text())
+      setFileName(next.name)
+
+      if (writable) {
+        link(next, documentKey())
+      } else {
+        unlink()
+        toast.warning(`Opened ${next.name} read-only: changes will not save to it`)
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error('Failed to open JSON')
+    }
   }
 
-  const onOpenJson = () => {
-    fileInputRef.current?.click()
-  }
-
+  // Browsers without file access: the plain upload, nothing to write back to.
   const onFileChange = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
 
     try {
-      const text = await file.text()
-      const payload = JSON.parse(text)
-      const params = payload?.params
-      const importedRegisters = payload?.registers
-
-      if (!params || !importedRegisters) {
-        throw new Error('Invalid JSON shape')
-      }
-
-      // Anything the file predates falls back to the schema default rather
-      // than to undefined, so an older document still opens.
-      const nextParams = paramsSchema.parse({
-        dataWidth: Number(params.dataWidth),
-        addrWidth: Number(params.addrWidth),
-        interface: params.interface ?? 'Native',
-        moduleName: params.moduleName ?? 'CSR',
-        parameters: params.parameters ?? [],
-        headerPrefix: params.headerPrefix ?? '',
-        registeredReadback: Boolean(params.registeredReadback),
-        sdcTarget: params.sdcTarget ?? 'synopsys',
-      })
-
-      setParams(nextParams)
-      setRegisters(importedRegisters)
+      applyProject(await file.text())
       setFileName(file.name)
-
-      const addrKeys = Object.keys(importedRegisters)
-      const firstAddr = addrKeys.length
-        ? Math.min(...addrKeys.map((key) => Number(key)))
-        : null
-
-      if (firstAddr != null && !Number.isNaN(firstAddr)) {
-        setCurrentRegister(firstAddr)
-      } else {
-        setCurrentRegister(null)
-      }
+      unlink()
     } catch (error) {
       console.error(error)
       toast.error('Failed to open JSON')
@@ -260,6 +266,35 @@ export const NavBar = () => {
           spellCheck={false}
           className='hover:border-input focus:border-input focus:ring-ring/50 h-8 min-w-24 flex-1 rounded-md border border-transparent bg-transparent px-2 font-mono text-sm outline-none focus:ring-[3px]'
         />
+
+        {/* Where the document stands against its file. Unlinked, it says why
+            nothing is being written, rather than saying nothing. */}
+        {handle ? (
+          <span
+            className={cn(
+              'shrink-0 text-xs whitespace-nowrap',
+              (SAVE_STATUS[status] ?? SAVE_STATUS.saved).className
+            )}
+            title={
+              status === 'error'
+                ? `Could not write ${handle.name}: ${saveError}`
+                : `Changes save to ${handle.name} automatically`
+            }
+          >
+            {(SAVE_STATUS[status] ?? SAVE_STATUS.saved).label}
+          </span>
+        ) : (
+          <span
+            className='text-muted-foreground shrink-0 text-xs whitespace-nowrap'
+            title={
+              canLinkFiles
+                ? 'Open or save a file to have changes save to it automatically'
+                : 'This browser cannot write back to a file: Save downloads a copy'
+            }
+          >
+            {canLinkFiles ? 'Autosave off' : 'No autosave'}
+          </span>
+        )}
 
         <Divider />
 

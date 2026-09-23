@@ -23,10 +23,12 @@ import { RegisterMap } from '@/components/register-map'
 import { RegisterDetail } from '@/components/register-detail'
 
 import { useCurrentRegisterStore } from '@/store/current-register-store'
+import useSidebarSize from '@/hooks/use-sidebar-size'
 import { BadgeAlert } from 'lucide-react'
 
 const HomePage = () => {
   const currentRegister = useCurrentRegisterStore((s) => s.currentRegister)
+  const sidebarSize = useSidebarSize('editorSidebar')
 
   // The same frame as the output views: a card inset from the window, the
   // sidebar headings set as their sidebar title is.
@@ -37,7 +39,7 @@ const HomePage = () => {
           {/* The panel clips by default; the sidebar is taller than the window
             once Parameters is open, so it scrolls instead. */}
           <ResizablePanel
-            defaultSize={20}
+            {...sidebarSize}
             className='overflow-y-auto!'
           >
             <Accordion
@@ -68,7 +70,7 @@ const HomePage = () => {
 
           <ResizableHandle />
 
-          <ResizablePanel defaultSize={80}>
+          <ResizablePanel defaultSize={100 - sidebarSize.defaultSize}>
             {currentRegister == null ? (
               <div className='flex h-full w-full items-center justify-center'>
                 <Empty>

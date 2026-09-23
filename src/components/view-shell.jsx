@@ -1,3 +1,9 @@
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable'
+import useSidebarSize from '@/hooks/use-sidebar-size'
 import { codeColors } from '@/lib/code-colors'
 import { cn } from '@/lib/utils'
 
@@ -45,46 +51,70 @@ export const ViewShell = ({
   subtitle,
   actions,
   children,
-}) => (
-  <div className='flex flex-1 flex-col gap-4 overflow-auto p-4'>
-    {error ? (
-      <div className='rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300'>
-        {error}
-      </div>
-    ) : (
-      <section className='bg-card flex min-h-0 flex-1 overflow-hidden rounded-lg border'>
-        <aside className='flex w-60 shrink-0 flex-col border-r'>
-          <div className='border-b px-4 py-3'>
-            <p className='text-sm font-medium'>{sidebarTitle}</p>
-            <p className='text-muted-foreground text-xs'>{sidebarSubtitle}</p>
-          </div>
+}) => {
+  const sidebarSize = useSidebarSize('viewSidebar')
 
-          <div
-            ref={sidebarRef}
-            className='flex-1 overflow-auto p-2'
-          >
-            {sidebar}
-          </div>
-        </aside>
-
-        <div className='flex min-w-0 flex-1 flex-col'>
-          <div className='flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3'>
-            <div className='min-w-0'>
-              <h3 className='truncate font-medium'>{title}</h3>
-              {subtitle && (
-                <p className='text-muted-foreground text-xs'>{subtitle}</p>
-              )}
-            </div>
-
-            <div className='flex flex-wrap items-center gap-2'>{actions}</div>
-          </div>
-
-          {children}
+  return (
+    <div className='flex flex-1 flex-col gap-4 overflow-auto p-4'>
+      {error ? (
+        <div className='rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300'>
+          {error}
         </div>
-      </section>
-    )}
-  </div>
-)
+      ) : (
+        <section className='bg-card flex min-h-0 flex-1 overflow-hidden rounded-lg border'>
+          {/* One width for every view's sidebar, saved with the document, so
+            switching views does not move the line the content starts on. */}
+          <ResizablePanelGroup direction='horizontal'>
+            <ResizablePanel
+              {...sidebarSize}
+              minSize={12}
+              maxSize={45}
+            >
+              <aside className='flex h-full flex-col'>
+                <div className='border-b px-4 py-3'>
+                  <p className='text-sm font-medium'>{sidebarTitle}</p>
+                  <p className='text-muted-foreground text-xs'>
+                    {sidebarSubtitle}
+                  </p>
+                </div>
+
+                <div
+                  ref={sidebarRef}
+                  className='flex-1 overflow-auto p-2'
+                >
+                  {sidebar}
+                </div>
+              </aside>
+            </ResizablePanel>
+
+            <ResizableHandle />
+
+            <ResizablePanel defaultSize={100 - sidebarSize.defaultSize}>
+              <div className='flex h-full min-w-0 flex-col'>
+                <div className='flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3'>
+                  <div className='min-w-0'>
+                    <h3 className='truncate font-medium'>{title}</h3>
+                    {subtitle && (
+                      <p className='text-muted-foreground text-xs'>
+                        {subtitle}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className='flex flex-wrap items-center gap-2'>
+                    {actions}
+                  </div>
+                </div>
+
+                {children}
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </section>
+      )}
+    </div>
+  )
+}
 
 /**
  * A generated file, numbered by line under a column strip, each line coloured
