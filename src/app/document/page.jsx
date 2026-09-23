@@ -80,7 +80,7 @@ const RegisterSection = ({ reg, dataWidth }) => (
       </div>
     </div>
 
-    <table className='w-full border-collapse text-xs'>
+    <table className='w-full border-collapse text-sm'>
       <thead>
         <tr>
           <th className={`${headCell} w-24`}>Bits</th>
@@ -110,9 +110,9 @@ const RegisterSection = ({ reg, dataWidth }) => (
 
     <a
       href={`#${MAP_ID}`}
-      className='text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs'
+      className='text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm'
     >
-      <ArrowUp className='h-3 w-3' />
+      <ArrowUp className='h-4 w-4' />
       Back to register map
     </a>
   </section>
@@ -132,7 +132,7 @@ const ContentsList = ({ entries, activeId }) =>
       active={entry.id === activeId}
       className={cn(
         'items-baseline gap-2',
-        entry.register && 'py-1 pl-6 font-mono text-xs'
+        entry.register && 'py-1.5 pl-6 font-mono'
       )}
     >
       <span className='truncate'>{entry.label}</span>
