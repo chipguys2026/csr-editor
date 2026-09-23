@@ -28,6 +28,7 @@ import {
 
 import packageInfo from '../../package.json'
 import { paramsSchema } from '@/schemas/params-schema'
+import { exportRegisterPdf } from '@/lib/pdf-export'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { useCurrentRegisterStore } from '@/store/current-register-store'
@@ -171,6 +172,19 @@ export const NavBar = () => {
     toast.success('Opened Excel preview')
   }
 
+  const onExportPdf = async () => {
+    try {
+      const filename = await exportRegisterPdf(
+        useParamStore.getState(),
+        registers
+      )
+      toast.success(`Downloaded ${filename}`)
+    } catch (error) {
+      console.error(error)
+      toast.error('Failed to export PDF')
+    }
+  }
+
   return (
     <>
       <nav className='flex flex-row items-center gap-4 border-b p-2'>
@@ -193,6 +207,7 @@ export const NavBar = () => {
               <MenubarItem onClick={onSaveJson}>Save JSON</MenubarItem>
               <MenubarSeparator />
               <MenubarItem onClick={onExportExcel}>Export Excel</MenubarItem>
+              <MenubarItem onClick={onExportPdf}>Export PDF</MenubarItem>
             </MenubarContent>
           </MenubarMenu>
 
@@ -289,6 +304,7 @@ export const NavBar = () => {
                     their timing
                   </li>
                   <li>Download the active RTL file or all generated outputs</li>
+                  <li>Export the register datasheet as PDF</li>
                 </ul>
               </div>
             </div>

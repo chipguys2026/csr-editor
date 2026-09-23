@@ -114,6 +114,27 @@ export const accessColorMap = {
 }
 
 /**
+ * The same fills as plain colours, for what cannot take a Tailwind class: the
+ * PDF, and the document page's access type key, which is coloured as the
+ * diagrams are so it reads as their legend.
+ */
+export const accessFillHex = {
+  RW: '#bfdbfe',
+  RO: '#fef08a',
+  WO: '#bbf7d0',
+  W1C: '#fbcfe8',
+  W1S: '#99f6e4',
+  W0C: '#fecdd3',
+  W1P: '#e9d5ff',
+  W1SC: '#fed7aa',
+  RSVD: '#e5e5e5',
+}
+
+/** The fill for a field, reserved bits in the neutral one. */
+export const accessFillOf = (access, reserved = false) =>
+  reserved ? accessFillHex.RSVD : (accessFillHex[access] ?? accessFillHex.RSVD)
+
+/**
  * Clocks a W1SC field stays asserted before it clears itself. Per field, since
  * the window is chosen to suit whatever consumes the strobe: 1 makes it an
  * ordinary single-cycle pulse, and a soft reset usually wants more.
