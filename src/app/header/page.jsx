@@ -1,10 +1,13 @@
 import { useMemo } from 'react'
 import { toast } from 'sonner'
 
+import { Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { generateHeaderFile } from '@/lib/csr-header'
+import { CodeView, SidebarItem, ViewShell } from '@/components/view-shell'
+import { codeColors } from '@/lib/code-colors'
 
 const downloadFile = (filename, content) => {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
@@ -18,35 +21,56 @@ const downloadFile = (filename, content) => {
   URL.revokeObjectURL(url)
 }
 
+/** Numbers in a C line: hex or decimal, with any unsigned/long suffix. */
+const NUMBER = /(\b0[xX][0-9a-fA-F]+[uUlL]*\b|\b\d+[uUlL]*\b)/
+
+const renderNumbers = (text) =>
+  text.split(NUMBER).map((part, index) =>
+    NUMBER.test(part) ? (
+      <span
+        key={index}
+        className={codeColors.number}
+      >
+        {part}
+      </span>
+    ) : (
+      <span key={index}>{part}</span>
+    )
+  )
+
 /**
  * Enough highlighting to tell the three things in this file apart: the
  * directives, the prose carried over from the register map, and the numbers.
+ * Coloured as the RTL is, a #define as its `define.
  */
 const renderLine = (line) => {
   if (line.trimStart().startsWith('/*') || line.trimStart().startsWith('*')) {
-    return <span className='text-emerald-600 dark:text-emerald-400'>{line}</span>
+    return <span className={codeColors.comment}>{line}</span>
   }
 
   const match = line.match(/^(#\w+)(\s+)(\S*)([\s\S]*)$/)
 
   if (!match) {
-    return line
+    return renderNumbers(line)
   }
 
   const [, directive, gap, name, rest] = match
 
   return (
     <>
-      <span className='text-violet-600 dark:text-violet-400'>{directive}</span>
+      <span className={codeColors.directive}>{directive}</span>
       {gap}
-      <span className='text-sky-700 dark:text-sky-300'>{name}</span>
+      {name}
       {rest.split(/(\/\*.*?\*\/)/).map((part, index) =>
         part.startsWith('/*') ? (
-          <span key={index} className='text-muted-foreground'>
+          <span
+            key={index}
+            className={codeColors.comment}
+          >
             {part}
           </span>
         ) : (
-          <span key={index}>{part}</span>
+          <span key={index}>{renderNumbers(part)}</span>
         )
       )}
     </>
@@ -65,7 +89,8 @@ const HeaderPage = () => {
     } catch (cause) {
       return {
         file: null,
-        error: cause instanceof Error ? cause.message : 'Failed to generate header',
+        error:
+          cause instanceof Error ? cause.message : 'Failed to generate header',
       }
     }
   }, [params, registers])
@@ -73,61 +98,37 @@ const HeaderPage = () => {
   const lines = useMemo(() => (file ? file.content.split('\n') : []), [file])
   const count = Object.keys(registers).length
 
-  if (error) {
-    return (
-      <div className='m-4 flex flex-1 flex-col overflow-hidden rounded-lg border'>
-        <div className='rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300'>
-          {error}
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className='m-4 flex flex-1 flex-col overflow-hidden rounded-lg border'>
-      <div className='flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3'>
-        <div>
-          <h3 className='font-medium'>{file.name}</h3>
-          <p className='text-muted-foreground text-xs'>
-            {count} register(s), {lines.length} lines
-          </p>
-        </div>
-
-        <Button
-          type='button'
-          variant='secondary'
-          onClick={() => {
-            downloadFile(file.name, file.content)
-            toast.success(`Downloaded ${file.name}`)
-          }}
-        >
-          Download
-        </Button>
-      </div>
-
-      <div className='bg-muted/30 text-muted-foreground grid grid-cols-[56px_1fr] border-b px-4 py-2 text-xs font-medium tracking-wide uppercase'>
-        <div>Line</div>
-        <div>Header</div>
-      </div>
-
-      <div className='min-h-0 flex-1 overflow-auto'>
-        <div className='font-mono text-xs leading-6'>
-          {lines.map((line, index) => (
-            <div
-              key={index}
-              className='hover:bg-muted/20 grid grid-cols-[56px_1fr] px-4'
-            >
-              <div className='text-muted-foreground pr-4 text-right select-none'>
-                {index + 1}
-              </div>
-              <pre className='overflow-x-auto break-words whitespace-pre-wrap'>
-                {renderLine(line || ' ')}
-              </pre>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+    <ViewShell
+      error={error}
+      sidebarTitle='Files'
+      sidebarSubtitle='1 generated file(s)'
+      sidebar={file && <SidebarItem active>{file.name}</SidebarItem>}
+      title={file?.name}
+      subtitle={`${count} register(s), ${lines.length} lines`}
+      actions={
+        file && (
+          <Button
+            type='button'
+            size='sm'
+            className='gap-2'
+            onClick={() => {
+              downloadFile(file.name, file.content)
+              toast.success(`Downloaded ${file.name}`)
+            }}
+          >
+            <Download className='h-4 w-4' />
+            Download Header
+          </Button>
+        )
+      }
+    >
+      <CodeView
+        label='Header'
+        lines={lines}
+        renderLine={renderLine}
+      />
+    </ViewShell>
   )
 }
 

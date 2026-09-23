@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { generateRtlFiles } from '@/lib/csr-rtl'
-import { cn } from '@/lib/utils'
+import { CodeView, SidebarItem, ViewShell } from '@/components/view-shell'
+import { codeColors } from '@/lib/code-colors'
 import { toast } from 'sonner'
 
 const downloadFile = (filename, content) => {
@@ -67,13 +69,13 @@ const renderHighlightedSegment = (segment, lineIndex) => {
       )
     }
 
-    let className = 'text-zinc-200'
+    let className = codeColors.text
     if (token.startsWith('`')) {
-      className = 'text-amber-300'
+      className = codeColors.directive
     } else if (VERILOG_KEYWORDS.has(token)) {
-      className = 'text-sky-300'
+      className = codeColors.keyword
     } else if (/^\d/.test(token)) {
-      className = 'text-emerald-300'
+      className = codeColors.number
     }
 
     nodes.push(
@@ -109,7 +111,7 @@ const renderHighlightedLine = (line, lineIndex) => {
   return (
     <>
       {renderHighlightedSegment(code, lineIndex)}
-      {hasComment && <span className='text-zinc-500'>{comment}</span>}
+      {hasComment && <span className={codeColors.comment}>{comment}</span>}
     </>
   )
 }
@@ -143,99 +145,63 @@ const RTLPage = () => {
   const activeLines = activeFile ? activeFile.content.split('\n') : []
 
   return (
-    <div className='flex flex-1 flex-col gap-4 overflow-auto p-4'>
-      {error ? (
-        <div className='rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300'>
-          {error}
-        </div>
-      ) : (
-        <section className='bg-card flex min-h-0 flex-1 overflow-hidden rounded-lg border'>
-          <aside className='flex w-60 shrink-0 flex-col border-r'>
-            <div className='border-b px-4 py-3'>
-              <p className='text-sm font-medium'>Files</p>
-              <p className='text-muted-foreground text-xs'>
-                {files.length} generated file(s)
-              </p>
-            </div>
+    <ViewShell
+      error={error}
+      sidebarTitle='Files'
+      sidebarSubtitle={`${files.length} generated file(s)`}
+      sidebar={files.map((file) => (
+        <SidebarItem
+          key={file.name}
+          active={file.name === activeFile?.name}
+          onClick={() => setSelectedFileName(file.name)}
+        >
+          {file.name}
+        </SidebarItem>
+      ))}
+      title={activeFile?.name ?? 'No file'}
+      subtitle={`${activeLines.length} lines`}
+      actions={
+        <>
+          {files.length > 0 && (
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='gap-2'
+              onClick={() => {
+                downloadAllFiles(files)
+                toast.success(`Downloading ${files.length} RTL file(s)`)
+              }}
+            >
+              <Download className='h-4 w-4' />
+              Download All
+            </Button>
+          )}
 
-            <div className='flex-1 overflow-auto p-2'>
-              {files.map((file) => (
-                <button
-                  key={file.name}
-                  type='button'
-                  className={cn(
-                    'flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors',
-                    file.name === activeFile?.name
-                      ? 'bg-accent text-accent-foreground'
-                      : 'hover:bg-accent/60'
-                  )}
-                  onClick={() => setSelectedFileName(file.name)}
-                >
-                  {file.name}
-                </button>
-              ))}
-            </div>
-          </aside>
-
-          <div className='flex min-w-0 flex-1 flex-col'>
-            <div className='flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3'>
-              <h3 className='font-medium'>{activeFile?.name ?? 'No file'}</h3>
-
-              <div className='flex flex-wrap items-center gap-2'>
-                {files.length > 0 && (
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    onClick={() => {
-                      downloadAllFiles(files)
-                      toast.success(`Downloading ${files.length} RTL file(s)`)
-                    }}
-                  >
-                    Download All
-                  </Button>
-                )}
-
-                {activeFile && (
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    onClick={() => {
-                      downloadFile(activeFile.name, activeFile.content)
-                      toast.success(`Downloaded ${activeFile.name}`)
-                    }}
-                  >
-                    Download
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            <div className='grid grid-cols-[56px_1fr] border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
-              <div>Line</div>
-              <div>Code</div>
-            </div>
-
-            <div className='min-h-0 flex-1 overflow-auto'>
-              <div className='font-mono text-xs leading-6'>
-                {activeLines.map((line, index) => (
-                  <div
-                    key={`${activeFile?.name ?? 'empty'}-${index}`}
-                    className='grid grid-cols-[56px_1fr] px-4 hover:bg-muted/20'
-                  >
-                    <div className='select-none pr-4 text-right text-muted-foreground'>
-                      {index + 1}
-                    </div>
-                    <pre className='overflow-x-auto whitespace-pre-wrap break-words text-zinc-200 dark:text-zinc-100'>
-                      {renderHighlightedLine(line || ' ', index)}
-                    </pre>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-    </div>
+          {activeFile && (
+            <Button
+              type='button'
+              size='sm'
+              className='gap-2'
+              onClick={() => {
+                downloadFile(activeFile.name, activeFile.content)
+                toast.success(`Downloaded ${activeFile.name}`)
+              }}
+            >
+              <Download className='h-4 w-4' />
+              Download File
+            </Button>
+          )}
+        </>
+      }
+    >
+      <CodeView
+        label='Code'
+        lines={activeLines}
+        renderLine={renderHighlightedLine}
+        keyPrefix={activeFile?.name ?? 'empty'}
+      />
+    </ViewShell>
   )
 }
 

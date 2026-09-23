@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowUp, FileDown, Loader2 } from 'lucide-react'
+import { ArrowUp, Download, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { RegisterDiagram } from '@/components/register-diagram'
@@ -10,6 +10,7 @@ import { exportRegisterPdf } from '@/lib/pdf-export'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { cn } from '@/lib/utils'
+import { SidebarItem, ViewShell } from '@/components/view-shell'
 
 const cell = 'border px-2 py-1 text-left align-top'
 const MAP_ID = 'register-map'
@@ -118,50 +119,30 @@ const RegisterSection = ({ reg, dataWidth }) => (
 )
 
 /**
- * The page's contents, down the left. It follows the reading position, so
- * in a long map it says which register is on screen as well as where the
+ * The page's contents, as the sidebar list. It follows the reading position,
+ * so in a long map it says which register is on screen as well as where the
  * others are.
  */
-const Contents = ({ entries, activeId }) => {
-  const listRef = useRef(null)
-
-  // Keep the current entry in view as the document scrolls past the end of
-  // what the sidebar shows.
-  useEffect(() => {
-    listRef.current
-      ?.querySelector(`[data-toc="${activeId}"]`)
-      ?.scrollIntoView({ block: 'nearest' })
-  }, [activeId])
-
-  return (
-    <nav
-      ref={listRef}
-      className='w-60 shrink-0 overflow-auto border-r p-2 text-sm'
+const ContentsList = ({ entries, activeId }) =>
+  entries.map((entry) => (
+    <SidebarItem
+      key={entry.id}
+      href={`#${entry.id}`}
+      data-toc={entry.id}
+      active={entry.id === activeId}
+      className={cn(
+        'items-baseline gap-2',
+        entry.register && 'py-1 pl-6 font-mono text-xs'
+      )}
     >
-      {entries.map((entry) => (
-        <a
-          key={entry.id}
-          href={`#${entry.id}`}
-          data-toc={entry.id}
-          className={cn(
-            'flex items-baseline gap-2 rounded-md px-2 py-1 transition-colors',
-            entry.register ? 'pl-5 font-mono text-xs' : 'font-medium',
-            entry.id === activeId
-              ? 'bg-accent text-accent-foreground'
-              : 'hover:bg-accent/60'
-          )}
-        >
-          <span className='truncate'>{entry.label}</span>
-          {entry.detail && (
-            <span className='text-muted-foreground ml-auto shrink-0'>
-              {entry.detail}
-            </span>
-          )}
-        </a>
-      ))}
-    </nav>
-  )
-}
+      <span className='truncate'>{entry.label}</span>
+      {entry.detail && (
+        <span className='text-muted-foreground ml-auto shrink-0'>
+          {entry.detail}
+        </span>
+      )}
+    </SidebarItem>
+  ))
 
 /**
  * Which section is being read: the last one whose top has scrolled past a
@@ -252,6 +233,15 @@ const DocumentPage = () => {
   )
   const activeId = useActiveSection(scrollRef, contentIds)
 
+  // Keep the current entry in view as the document scrolls past the end of
+  // what the sidebar shows.
+  const sidebarRef = useRef(null)
+  useEffect(() => {
+    sidebarRef.current
+      ?.querySelector(`[data-toc="${activeId}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [activeId])
+
   const onExport = async () => {
     setExporting(true)
     try {
@@ -265,9 +255,19 @@ const DocumentPage = () => {
   }
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col'>
-      <div className='flex items-center justify-between border-b px-4 py-2'>
-        <p className='text-muted-foreground text-sm'>Register datasheet</p>
+    <ViewShell
+      sidebarTitle='Contents'
+      sidebarSubtitle={`${doc.registers.length} register(s)`}
+      sidebarRef={sidebarRef}
+      sidebar={
+        <ContentsList
+          entries={contents}
+          activeId={activeId}
+        />
+      }
+      title={`${doc.title}_registers.pdf`}
+      subtitle='Register datasheet'
+      actions={
         <Button
           size='sm'
           className='gap-2'
@@ -277,166 +277,155 @@ const DocumentPage = () => {
           {exporting ? (
             <Loader2 className='h-4 w-4 animate-spin' />
           ) : (
-            <FileDown className='h-4 w-4' />
+            <Download className='h-4 w-4' />
           )}
           Download PDF
         </Button>
-      </div>
+      }
+    >
+      <div
+        ref={scrollRef}
+        className='min-h-0 flex-1 overflow-auto scroll-smooth'
+      >
+        <article className='mx-auto max-w-5xl space-y-8 p-8'>
+          <header
+            id='overview'
+            className='scroll-mt-4 space-y-4'
+          >
+            <h1 className='text-3xl font-bold'>
+              {doc.title} Register Specification
+            </h1>
 
-      <div className='flex min-h-0 flex-1'>
-        <Contents
-          entries={contents}
-          activeId={activeId}
-        />
+            <table className='border-collapse text-sm'>
+              <tbody>
+                {doc.summary.map(([label, value]) => (
+                  <tr key={label}>
+                    <th className={`${headCell} w-40`}>{label}</th>
+                    <td className={`${cell} font-mono`}>{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </header>
 
-        <div
-          ref={scrollRef}
-          className='min-h-0 flex-1 overflow-auto scroll-smooth'
-        >
-          <article className='mx-auto max-w-5xl space-y-8 p-8'>
-            <header
-              id='overview'
-              className='scroll-mt-4 space-y-4'
+          {doc.parameters.length > 0 && (
+            <section
+              id='parameters'
+              className='scroll-mt-4 break-inside-avoid space-y-2'
             >
-              <h1 className='text-3xl font-bold'>
-                {doc.title} Register Specification
-              </h1>
-
+              <h2 className='text-xl font-semibold'>Parameters</h2>
               <table className='border-collapse text-sm'>
+                <thead>
+                  <tr>
+                    <th className={headCell}>Name</th>
+                    <th className={headCell}>Default</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {doc.summary.map(([label, value]) => (
-                    <tr key={label}>
-                      <th className={`${headCell} w-40`}>{label}</th>
-                      <td className={`${cell} font-mono`}>{value}</td>
+                  {doc.parameters.map((entry) => (
+                    <tr key={entry.name}>
+                      <td className={`${cell} font-mono`}>{entry.name}</td>
+                      <td className={`${cell} font-mono`}>{entry.value}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </header>
-
-            {doc.parameters.length > 0 && (
-              <section
-                id='parameters'
-                className='scroll-mt-4 break-inside-avoid space-y-2'
-              >
-                <h2 className='text-xl font-semibold'>Parameters</h2>
-                <table className='border-collapse text-sm'>
-                  <thead>
-                    <tr>
-                      <th className={headCell}>Name</th>
-                      <th className={headCell}>Default</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {doc.parameters.map((entry) => (
-                      <tr key={entry.name}>
-                        <td className={`${cell} font-mono`}>{entry.name}</td>
-                        <td className={`${cell} font-mono`}>{entry.value}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
-            )}
-
-            {doc.accessTypes.length > 0 && (
-              <section
-                id='access-types'
-                className='scroll-mt-4 break-inside-avoid space-y-2'
-              >
-                <h2 className='text-xl font-semibold'>Access Types</h2>
-                <table className='w-full border-collapse text-sm'>
-                  <tbody>
-                    {doc.accessTypes.map((entry) => (
-                      <tr key={entry.type}>
-                        <th
-                          className={`${cell} w-20 font-mono font-semibold text-neutral-900`}
-                          style={{ backgroundColor: accessFillOf(entry.type) }}
-                        >
-                          {entry.type}
-                        </th>
-                        <td className={cell}>{entry.description}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
-            )}
-
-            <section
-              id={MAP_ID}
-              className='scroll-mt-4 space-y-2'
-            >
-              <h2 className='text-xl font-semibold'>Register Map</h2>
-              {doc.registers.length === 0 ? (
-                <p className='text-muted-foreground text-sm'>
-                  No registers defined.
-                </p>
-              ) : (
-                <table className='w-full border-collapse text-sm'>
-                  <thead>
-                    <tr>
-                      <th className={`${headCell} w-56`}>Address</th>
-                      <th className={`${headCell} w-48`}>Register</th>
-                      <th className={`${headCell} w-28`}>Reset</th>
-                      <th className={headCell}>Description</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {doc.registers.map((reg) => (
-                      <tr
-                        key={reg.id}
-                        className='break-inside-avoid'
-                      >
-                        <td className={`${cell} font-mono`}>
-                          {reg.address}
-                          {reg.range && (
-                            <div className='text-muted-foreground text-xs'>
-                              {reg.range}
-                            </div>
-                          )}
-                        </td>
-                        <td className={`${cell} font-mono`}>
-                          <a
-                            href={`#${reg.id}`}
-                            className='underline-offset-2 hover:underline'
-                          >
-                            {reg.name}
-                          </a>
-                        </td>
-                        <td className={`${cell} font-mono`}>
-                          {reg.resetValue}
-                        </td>
-                        {/* First line only: the full text is in the register's
-                          own section. */}
-                        <td className={cell}>
-                          {reg.description.split('\n')[0]}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
             </section>
+          )}
 
-            {doc.registers.length > 0 && (
-              <div className='space-y-10'>
-                <h2 className='break-after-avoid text-xl font-semibold'>
-                  Registers
-                </h2>
-                {doc.registers.map((reg) => (
-                  <RegisterSection
-                    key={reg.id}
-                    reg={reg}
-                    dataWidth={dataWidth}
-                  />
-                ))}
-              </div>
+          {doc.accessTypes.length > 0 && (
+            <section
+              id='access-types'
+              className='scroll-mt-4 break-inside-avoid space-y-2'
+            >
+              <h2 className='text-xl font-semibold'>Access Types</h2>
+              <table className='w-full border-collapse text-sm'>
+                <tbody>
+                  {doc.accessTypes.map((entry) => (
+                    <tr key={entry.type}>
+                      <th
+                        className={`${cell} w-20 font-mono font-semibold text-neutral-900`}
+                        style={{ backgroundColor: accessFillOf(entry.type) }}
+                      >
+                        {entry.type}
+                      </th>
+                      <td className={cell}>{entry.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
+          <section
+            id={MAP_ID}
+            className='scroll-mt-4 space-y-2'
+          >
+            <h2 className='text-xl font-semibold'>Register Map</h2>
+            {doc.registers.length === 0 ? (
+              <p className='text-muted-foreground text-sm'>
+                No registers defined.
+              </p>
+            ) : (
+              <table className='w-full border-collapse text-sm'>
+                <thead>
+                  <tr>
+                    <th className={`${headCell} w-56`}>Address</th>
+                    <th className={`${headCell} w-48`}>Register</th>
+                    <th className={`${headCell} w-28`}>Reset</th>
+                    <th className={headCell}>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {doc.registers.map((reg) => (
+                    <tr
+                      key={reg.id}
+                      className='break-inside-avoid'
+                    >
+                      <td className={`${cell} font-mono`}>
+                        {reg.address}
+                        {reg.range && (
+                          <div className='text-muted-foreground text-xs'>
+                            {reg.range}
+                          </div>
+                        )}
+                      </td>
+                      <td className={`${cell} font-mono`}>
+                        <a
+                          href={`#${reg.id}`}
+                          className='underline-offset-2 hover:underline'
+                        >
+                          {reg.name}
+                        </a>
+                      </td>
+                      <td className={`${cell} font-mono`}>{reg.resetValue}</td>
+                      {/* First line only: the full text is in the register's
+                          own section. */}
+                      <td className={cell}>{reg.description.split('\n')[0]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
-          </article>
-        </div>
+          </section>
+
+          {doc.registers.length > 0 && (
+            <div className='space-y-10'>
+              <h2 className='break-after-avoid text-xl font-semibold'>
+                Registers
+              </h2>
+              {doc.registers.map((reg) => (
+                <RegisterSection
+                  key={reg.id}
+                  reg={reg}
+                  dataWidth={dataWidth}
+                />
+              ))}
+            </div>
+          )}
+        </article>
       </div>
-    </div>
+    </ViewShell>
   )
 }
 

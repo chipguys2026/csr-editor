@@ -4,7 +4,7 @@ import { useRegisterStore } from '@/store/register-store'
 import { exportToExcel, generateExcelData } from '@/lib/excel-export'
 import { Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { SidebarItem, ViewShell } from '@/components/view-shell'
 
 const ExcelPage = () => {
   const { moduleName, dataWidth, addrWidth, interface: csrInterface, parameters } =
@@ -28,73 +28,48 @@ const ExcelPage = () => {
     exportToExcel(moduleName, params, registers)
   }
 
+  const sheets = [
+    { value: 'summary', label: 'Summary' },
+    { value: 'registers', label: 'Registers' },
+    { value: 'flat registers', label: 'Flat Registers' },
+  ]
+
   return (
-    <div className='flex flex-1 overflow-hidden rounded-lg border m-4'>
-      {/* Left Sidebar */}
-      <aside className='flex w-56 shrink-0 flex-col border-r'>
-        <div className='border-b px-4 py-3'>
-          <p className='text-sm font-medium'>Excel Preview</p>
-          <p className='text-muted-foreground text-xs'>
-            3 sheet(s)
-          </p>
-        </div>
-
-        <div className='flex-1 overflow-auto p-2'>
-          <button
-            type='button'
-            className={cn(
-              'flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors',
-              activeTab === 'summary'
-                ? 'bg-accent text-accent-foreground'
-                : 'hover:bg-accent/60'
-            )}
-            onClick={() => setActiveTab('summary')}
-          >
-            Summary
-          </button>
-          <button
-            type='button'
-            className={cn(
-              'flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors',
-              activeTab === 'registers'
-                ? 'bg-accent text-accent-foreground'
-                : 'hover:bg-accent/60'
-            )}
-            onClick={() => setActiveTab('registers')}
-          >
-            Registers
-          </button>
-          <button
-            type='button'
-            className={cn(
-              'flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors',
-              activeTab === 'flat registers'
-                ? 'bg-accent text-accent-foreground'
-                : 'hover:bg-accent/60'
-            )}
-            onClick={() => setActiveTab('flat registers')}
-          >
-            Flat Registers
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <div className='flex min-w-0 flex-1 flex-col'>
-        <div className='flex items-center justify-between border-b px-4 py-3'>
-          <h3 className='font-medium capitalize'>{activeTab}</h3>
-          <Button onClick={handleDownload} className='gap-2' size='sm'>
-            <Download className='h-4 w-4' />
-            Download Excel
-          </Button>
-        </div>
-
+    <ViewShell
+      sidebarTitle='Sheets'
+      sidebarSubtitle={`${sheets.length} sheet(s) in ${moduleName}.xlsx`}
+      sidebar={sheets.map((sheet) => (
+        <SidebarItem
+          key={sheet.value}
+          active={activeTab === sheet.value}
+          onClick={() => setActiveTab(sheet.value)}
+        >
+          {sheet.label}
+        </SidebarItem>
+      ))}
+      title={sheets.find((sheet) => sheet.value === activeTab)?.label}
+      subtitle={
+        activeTab === 'summary'
+          ? 'Module parameters'
+          : `${(activeTab === 'registers' ? excelData.registers : excelData.flat).length} row(s)`
+      }
+      actions={
+        <Button
+          onClick={handleDownload}
+          className='gap-2'
+          size='sm'
+        >
+          <Download className='h-4 w-4' />
+          Download Excel
+        </Button>
+      }
+    >
         <div className='flex-1 overflow-auto p-4'>
           {activeTab === 'summary' && (
             <div className='border rounded-lg overflow-hidden max-w-2xl'>
               <table className='w-full text-sm'>
                 <thead>
-                  <tr className='bg-blue-600 text-white'>
+                  <tr className='bg-muted/30 text-muted-foreground text-xs font-medium tracking-wide uppercase'>
                     <th className='px-4 py-2 text-left border'>Parameter</th>
                     <th className='px-4 py-2 text-left border'>Value</th>
                   </tr>
@@ -130,7 +105,7 @@ const ExcelPage = () => {
               <div className='overflow-x-auto'>
                 <table className='w-full text-sm'>
                   <thead>
-                    <tr className='bg-blue-600 text-white'>
+                    <tr className='bg-muted/30 text-muted-foreground text-xs font-medium tracking-wide uppercase'>
                       <th className='px-3 py-2 text-left border min-w-[80px]'>Address</th>
                       <th className='px-3 py-2 text-left border min-w-[120px]'>Register Name</th>
                       <th className='px-3 py-2 text-left border min-w-[140px]'>Field Name</th>
@@ -145,7 +120,7 @@ const ExcelPage = () => {
                     {excelData.registers.map((row, idx) => (
                       <tr
                         key={idx}
-                        className={`${row.isRegisterRow ? 'bg-gray-200 dark:bg-gray-700' : ''}`}
+                        className={`${row.isRegisterRow ? 'bg-muted/60' : 'hover:bg-muted/20'}`}
                       >
                         <td className={`px-3 py-2 border font-mono ${row.isRegisterRow ? 'font-bold' : ''}`}>
                           {row.address}
@@ -178,7 +153,7 @@ const ExcelPage = () => {
               <div className='overflow-x-auto'>
                 <table className='w-full text-sm'>
                   <thead>
-                    <tr className='bg-blue-600 text-white'>
+                    <tr className='bg-muted/30 text-muted-foreground text-xs font-medium tracking-wide uppercase'>
                       <th className='min-w-[100px] border px-3 py-2 text-left'>Address</th>
                       <th className='min-w-[180px] border px-3 py-2 text-left'>Register Name</th>
                       <th className='min-w-[140px] border px-3 py-2 text-left'>Field Name</th>
@@ -193,7 +168,7 @@ const ExcelPage = () => {
                     {excelData.flat.map((row, idx) => (
                       <tr
                         key={idx}
-                        className={row.isRegisterRow ? 'bg-gray-200 dark:bg-gray-700' : ''}
+                        className={row.isRegisterRow ? 'bg-muted/60' : 'hover:bg-muted/20'}
                       >
                         <td className={`border px-3 py-2 font-mono ${row.isRegisterRow ? 'font-bold' : ''}`}>
                           {row.address}
@@ -219,8 +194,7 @@ const ExcelPage = () => {
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </ViewShell>
   )
 }
 

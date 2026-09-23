@@ -1,9 +1,12 @@
 import { useMemo } from 'react'
 import { toast } from 'sonner'
 
+import { Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
+import { CodeView, SidebarItem, ViewShell } from '@/components/view-shell'
+import { codeColors } from '@/lib/code-colors'
 import {
   SDC_TARGETS,
   countQuasiStaticFields,
@@ -45,33 +48,35 @@ const SDC_COMMANDS = new Set([
 /**
  * Enough highlighting to tell a constraint from the commentary around it: the
  * comments carry which field a line belongs to, and the commands carry what is
- * being done to it.
+ * being done to it. Coloured as the RTL is: commands as its keywords, the Tcl
+ * substitutions as its directives.
  */
 const renderLine = (line) => {
   if (line.trimStart().startsWith('#')) {
-    return <span className='text-emerald-600 dark:text-emerald-400'>{line}</span>
+    return <span className={codeColors.comment}>{line}</span>
   }
 
   return line
-    .split(/([A-Za-z_]\w*|\$\w+|"[^"]*")/)
+    .split(/([A-Za-z_]\w*|\$\w+|"[^"]*"|\b\d+\b)/)
     .map((part, index) => {
+      let className = null
+
       if (SDC_COMMANDS.has(part)) {
-        return (
-          <span key={index} className='text-violet-600 dark:text-violet-400'>
-            {part}
-          </span>
-        )
+        className = codeColors.keyword
+      } else if (part.startsWith('$') || part.startsWith('"')) {
+        className = codeColors.directive
+      } else if (/^\d+$/.test(part)) {
+        className = codeColors.number
       }
 
-      if (part.startsWith('$') || part.startsWith('"')) {
-        return (
-          <span key={index} className='text-sky-700 dark:text-sky-300'>
-            {part}
-          </span>
-        )
-      }
-
-      return <span key={index}>{part}</span>
+      return (
+        <span
+          key={index}
+          className={className ?? undefined}
+        >
+          {part}
+        </span>
+      )
     })
 }
 
@@ -88,7 +93,8 @@ const SDCPage = () => {
     } catch (cause) {
       return {
         file: null,
-        error: cause instanceof Error ? cause.message : 'Failed to generate SDC',
+        error:
+          cause instanceof Error ? cause.message : 'Failed to generate SDC',
       }
     }
   }, [params, registers])
@@ -96,89 +102,68 @@ const SDCPage = () => {
   const lines = useMemo(() => (file ? file.content.split('\n') : []), [file])
   const marked = countQuasiStaticFields(registers)
 
-  if (error) {
-    return (
-      <div className='m-4 flex flex-1 flex-col overflow-hidden rounded-lg border'>
-        <div className='rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300'>
-          {error}
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className='m-4 flex flex-1 flex-col overflow-hidden rounded-lg border'>
-      <div className='flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3'>
-        <div>
-          <h3 className='font-medium'>{file.name}</h3>
-          <p className='text-muted-foreground text-xs'>
-            {marked === 0
-              ? 'No field is marked quasi-static'
-              : `${marked} field(s) cut, ${lines.length} lines`}
-          </p>
-        </div>
-
-        <div className='flex items-center gap-2'>
-          <Select
-            value={params.sdcTarget ?? 'synopsys'}
-            onValueChange={(value) => setParams({ sdcTarget: value })}
-          >
-            <SelectTrigger
-              className='w-48'
-              title='Object naming follows the synthesis tool, and does not carry between them'
+    <ViewShell
+      error={error}
+      sidebarTitle='Files'
+      sidebarSubtitle='1 generated file(s)'
+      sidebar={file && <SidebarItem active>{file.name}</SidebarItem>}
+      title={file?.name}
+      subtitle={
+        marked === 0
+          ? 'No field is marked quasi-static'
+          : `${marked} field(s) cut, ${lines.length} lines`
+      }
+      actions={
+        file && (
+          <>
+            <Select
+              value={params.sdcTarget ?? 'synopsys'}
+              onValueChange={(value) => setParams({ sdcTarget: value })}
             >
-              <SelectValue />
-            </SelectTrigger>
+              <SelectTrigger
+                size='sm'
+                className='w-48'
+                title='Object naming follows the synthesis tool, and does not carry between them'
+              >
+                <SelectValue />
+              </SelectTrigger>
 
-            <SelectContent>
-              {Object.entries(SDC_TARGETS).map(([value, target]) => (
-                <SelectItem
-                  key={value}
-                  value={value}
-                  title={target.note}
-                >
-                  {target.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <SelectContent>
+                {Object.entries(SDC_TARGETS).map(([value, target]) => (
+                  <SelectItem
+                    key={value}
+                    value={value}
+                    title={target.note}
+                  >
+                    {target.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          <Button
-            type='button'
-            variant='secondary'
-            onClick={() => {
-              downloadFile(file.name, file.content)
-              toast.success(`Downloaded ${file.name}`)
-            }}
-          >
-            Download
-          </Button>
-        </div>
-      </div>
-
-      <div className='bg-muted/30 text-muted-foreground grid grid-cols-[56px_1fr] border-b px-4 py-2 text-xs font-medium tracking-wide uppercase'>
-        <div>Line</div>
-        <div>Constraint</div>
-      </div>
-
-      <div className='min-h-0 flex-1 overflow-auto'>
-        <div className='font-mono text-xs leading-6'>
-          {lines.map((line, index) => (
-            <div
-              key={index}
-              className='hover:bg-muted/20 grid grid-cols-[56px_1fr] px-4'
+            <Button
+              type='button'
+              size='sm'
+              className='gap-2'
+              onClick={() => {
+                downloadFile(file.name, file.content)
+                toast.success(`Downloaded ${file.name}`)
+              }}
             >
-              <div className='text-muted-foreground pr-4 text-right select-none'>
-                {index + 1}
-              </div>
-              <pre className='overflow-x-auto break-words whitespace-pre-wrap'>
-                {renderLine(line || ' ')}
-              </pre>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+              <Download className='h-4 w-4' />
+              Download SDC
+            </Button>
+          </>
+        )
+      }
+    >
+      <CodeView
+        label='Constraint'
+        lines={lines}
+        renderLine={renderLine}
+      />
+    </ViewShell>
   )
 }
 
