@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import useTheme from '@/hooks/use-theme'
@@ -70,14 +70,21 @@ export const NavBar = () => {
   )
   const fileInputRef = useRef(null)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
-  const viewRoutes = [
-    { label: 'Editor', value: 'editor', path: '/' },
-    { label: 'Document', value: 'document', path: '/document' },
-    { label: 'Excel', value: 'excel', path: '/excel' },
-    { label: 'RTL', value: 'rtl', path: '/rtl' },
-    { label: 'C Header', value: 'header', path: '/header' },
-    { label: 'SDC', value: 'sdc', path: '/sdc' },
+  // Grouped by who reads them: the editor, the documentation, the
+  // generated sources. The menu draws a separator between groups.
+  const viewGroups = [
+    [{ label: 'Editor', value: 'editor', path: '/' }],
+    [
+      { label: 'Document', value: 'document', path: '/document' },
+      { label: 'Excel', value: 'excel', path: '/excel' },
+    ],
+    [
+      { label: 'RTL', value: 'rtl', path: '/rtl' },
+      { label: 'SDC', value: 'sdc', path: '/sdc' },
+      { label: 'C Header', value: 'header', path: '/header' },
+    ],
   ]
+  const viewRoutes = viewGroups.flat()
   const currentView =
     viewRoutes.find((route) => route.path === location.pathname)?.value ??
     'editor'
@@ -221,13 +228,18 @@ export const NavBar = () => {
                   if (next) navigate(next.path)
                 }}
               >
-                {viewRoutes.map((route) => (
-                  <MenubarRadioItem
-                    key={route.value}
-                    value={route.value}
-                  >
-                    {route.label}
-                  </MenubarRadioItem>
+                {viewGroups.map((group, index) => (
+                  <Fragment key={group[0].value}>
+                    {index > 0 && <MenubarSeparator />}
+                    {group.map((route) => (
+                      <MenubarRadioItem
+                        key={route.value}
+                        value={route.value}
+                      >
+                        {route.label}
+                      </MenubarRadioItem>
+                    ))}
+                  </Fragment>
                 ))}
               </MenubarRadioGroup>
               <MenubarSeparator />
