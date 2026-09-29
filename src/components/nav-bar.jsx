@@ -1,23 +1,26 @@
-import { useRef, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import useTheme from '@/hooks/use-theme'
-
-import { Sun, Moon, SunMoon } from 'lucide-react'
+import useAutosave from '@/hooks/use-autosave'
 
 import {
-  Menubar,
-  MenubarContent,
-  MenubarItem,
-  MenubarMenu,
-  MenubarRadioGroup,
-  MenubarRadioItem,
-  MenubarSeparator,
-  MenubarSub,
-  MenubarSubContent,
-  MenubarSubTrigger,
-  MenubarTrigger,
-} from '@/components/ui/menubar'
+  Braces,
+  Cpu,
+  FilePlus,
+  FileSpreadsheet,
+  FileText,
+  FolderOpen,
+  Info,
+  Moon,
+  Save,
+  SquarePen,
+  Sun,
+  SunMoon,
+  Timer,
+} from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -28,45 +31,88 @@ import {
 
 import packageInfo from '../../package.json'
 import { paramsSchema } from '@/schemas/params-schema'
+import { cn } from '@/lib/utils'
+import {
+  applyProject,
+  canLinkFiles,
+  documentKey,
+  downloadProject,
+  pickFileToOpen,
+  pickFileToSave,
+  requestWriteAccess,
+  serializeProject,
+  writeToHandle,
+} from '@/lib/project-file'
 import { useParamStore } from '@/store/params-store'
 import { useRegisterStore } from '@/store/register-store'
 import { useCurrentRegisterStore } from '@/store/current-register-store'
+import { useFileStore } from '@/store/file-store'
 import { toast } from 'sonner'
 
-const downloadJson = (filename, data) => {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: 'application/json',
-  })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+/** Theme button: each press moves to the next, and shows where it is now. */
+const THEMES = [
+  { value: 'light', label: 'Light', Icon: Sun },
+  { value: 'dark', label: 'Dark', Icon: Moon },
+  { value: 'system', label: 'System', Icon: SunMoon },
+]
+
+/** A thin upright rule between toolbar groups. */
+const Divider = () => <div className='bg-border mx-1 h-5 w-px shrink-0' />
+
+/** What the status beside the file name says, and how. */
+const SAVE_STATUS = {
+  pending: { label: 'Edited', className: 'text-muted-foreground' },
+  saving: { label: 'Saving…', className: 'text-muted-foreground' },
+  saved: { label: 'Saved', className: 'text-muted-foreground' },
+  error: { label: 'Save failed', className: 'text-red-600 dark:text-red-400' },
 }
+
+/** A file name as Save writes it: always ending in .json. */
+const asJsonName = (name) => (/\.json$/i.test(name) ? name : `${name}.json`)
 
 export const NavBar = () => {
   const { theme, setTheme } = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
-  const { dataWidth, addrWidth, interface: csrInterface, moduleName } =
-    useParamStore()
-  const registers = useRegisterStore((state) => state.registers)
+  const moduleName = useParamStore((state) => state.moduleName)
   const setParams = useParamStore((state) => state.setParams)
   const setRegisters = useRegisterStore((state) => state.setRegisters)
   const setCurrentRegister = useCurrentRegisterStore(
     (state) => state.setCurrentRegister
   )
   const fileInputRef = useRef(null)
+  const { handle, status, error: saveError, link, unlink } = useFileStore()
   const [isAboutOpen, setIsAboutOpen] = useState(false)
-  const viewRoutes = [
-    { label: 'Editor', value: 'editor', path: '/' },
-    { label: 'Document', value: 'document', path: '/document' },
-    { label: 'RTL', value: 'rtl', path: '/rtl' },
-    { label: 'SDC', value: 'sdc', path: '/sdc' },
+  // The file the document came from, and is saved back as. Left empty it
+  // falls back to the module name, which is what a new document is saved as.
+  const [fileName, setFileName] = useState('')
+
+  useAutosave()
+  // Grouped by who reads them: the editor, the documentation, the
+  // generated sources. The toolbar draws a divider between groups.
+  const viewGroups = [
+    [{ label: 'Editor', value: 'editor', path: '/', Icon: SquarePen }],
+    [
+      {
+        label: 'Document',
+        value: 'document',
+        path: '/document',
+        Icon: FileText,
+      },
+      {
+        label: 'Excel',
+        value: 'excel',
+        path: '/excel',
+        Icon: FileSpreadsheet,
+      },
+    ],
+    [
+      { label: 'RTL', value: 'rtl', path: '/rtl', Icon: Cpu },
+      { label: 'SDC', value: 'sdc', path: '/sdc', Icon: Timer },
+      { label: 'C Header', value: 'header', path: '/header', Icon: Braces },
+    ],
   ]
+  const viewRoutes = viewGroups.flat()
   const currentView =
     viewRoutes.find((route) => route.path === location.pathname)?.value ??
     'editor'
@@ -75,69 +121,85 @@ export const NavBar = () => {
     setParams(paramsSchema.parse({}))
     setRegisters({})
     setCurrentRegister(null)
+    setFileName('')
+    // A new document is not the file that was open: stop writing to it.
+    unlink()
     navigate('/')
     toast.success('Created a new CSR document')
   }
 
-  const onSaveJson = () => {
-    const payload = {
-      metadata: {
-        tool: {
-          name: packageInfo.name,
-          version: packageInfo.version,
-        },
-        generatedAt: new Date().toISOString(),
-      },
-      params: {
-        dataWidth,
-        addrWidth,
-        interface: csrInterface,
-        moduleName,
-      },
-      registers,
+  // Save writes to the linked file when the name still matches it. A new name,
+  // or no file yet, asks where to save - and links the document to it, so
+  // autosave takes over from there. Without file access it downloads a copy.
+  const onSaveJson = async () => {
+    const name = asJsonName(fileName.trim() || `${moduleName}.json`)
+
+    try {
+      if (handle && handle.name === name) {
+        useFileStore.getState().setStatus('saving')
+        await writeToHandle(handle, serializeProject())
+        useFileStore.getState().markSaved(documentKey())
+        toast.success(`Saved ${name}`)
+        return
+      }
+
+      if (!canLinkFiles) {
+        downloadProject(name, serializeProject())
+        return
+      }
+
+      const next = await pickFileToSave(name)
+      if (!next) return
+
+      await writeToHandle(next, serializeProject())
+      link(next, documentKey())
+      setFileName(next.name)
+      toast.success(`Saved ${next.name} - changes now save to it`)
+    } catch (error) {
+      console.error(error)
+      useFileStore.getState().setStatus('error', error?.message)
+      toast.error('Failed to save JSON')
+    }
+  }
+
+  const onOpenJson = async () => {
+    if (!canLinkFiles) {
+      fileInputRef.current?.click()
+      return
     }
 
-    downloadJson(`${moduleName}.json`, payload)
+    try {
+      const next = await pickFileToOpen()
+      if (!next) return
+
+      // Asked straight after the pick, while the click still counts: the
+      // browser will not ask later, from an autosave.
+      const writable = await requestWriteAccess(next)
+
+      applyProject(await (await next.getFile()).text())
+      setFileName(next.name)
+
+      if (writable) {
+        link(next, documentKey())
+      } else {
+        unlink()
+        toast.warning(`Opened ${next.name} read-only: changes will not save to it`)
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error('Failed to open JSON')
+    }
   }
 
-  const onOpenJson = () => {
-    fileInputRef.current?.click()
-  }
-
+  // Browsers without file access: the plain upload, nothing to write back to.
   const onFileChange = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
 
     try {
-      const text = await file.text()
-      const payload = JSON.parse(text)
-      const params = payload?.params
-      const importedRegisters = payload?.registers
-
-      if (!params || !importedRegisters) {
-        throw new Error('Invalid JSON shape')
-      }
-
-      const nextParams = paramsSchema.parse({
-        dataWidth: Number(params.dataWidth),
-        addrWidth: Number(params.addrWidth),
-        interface: params.interface ?? 'Native',
-        moduleName: params.moduleName ?? 'CSR',
-      })
-
-      setParams(nextParams)
-      setRegisters(importedRegisters)
-
-      const addrKeys = Object.keys(importedRegisters)
-      const firstAddr = addrKeys.length
-        ? Math.min(...addrKeys.map((key) => Number(key)))
-        : null
-
-      if (firstAddr != null && !Number.isNaN(firstAddr)) {
-        setCurrentRegister(firstAddr)
-      } else {
-        setCurrentRegister(null)
-      }
+      applyProject(await file.text())
+      setFileName(file.name)
+      unlink()
     } catch (error) {
       console.error(error)
       toast.error('Failed to open JSON')
@@ -146,10 +208,17 @@ export const NavBar = () => {
     }
   }
 
+  const themeIndex = Math.max(
+    0,
+    THEMES.findIndex((entry) => entry.value === theme)
+  )
+  const { Icon: ThemeIcon, label: themeLabel } = THEMES[themeIndex]
+  const nextTheme = THEMES[(themeIndex + 1) % THEMES.length]
+
   return (
     <>
-      <nav className='flex flex-row items-center gap-4 border-b p-2'>
-        <h1 className='font-bold'>CSR Editor</h1>
+      <nav className='flex flex-row items-center gap-1 border-b p-2'>
+        <h1 className='mr-3 font-bold whitespace-nowrap'>CSR Editor</h1>
         <input
           ref={fileInputRef}
           type='file'
@@ -158,71 +227,120 @@ export const NavBar = () => {
           onChange={onFileChange}
         />
 
-        <Menubar className='border-0'>
-          <MenubarMenu>
-            <MenubarTrigger>File</MenubarTrigger>
-            <MenubarContent>
-              <MenubarItem onClick={onNewJson}>New</MenubarItem>
-              <MenubarSeparator />
-              <MenubarItem onClick={onOpenJson}>Open JSON</MenubarItem>
-              <MenubarItem onClick={onSaveJson}>Save JSON</MenubarItem>
-              <MenubarSeparator />
-              <MenubarItem>Export PDF</MenubarItem>
-            </MenubarContent>
-          </MenubarMenu>
+        <Button
+          variant='ghost'
+          size='sm'
+          onClick={onNewJson}
+          title='Start a new document'
+        >
+          <FilePlus />
+          New
+        </Button>
+        <Button
+          variant='ghost'
+          size='sm'
+          onClick={onOpenJson}
+          title='Open a document from a JSON file'
+        >
+          <FolderOpen />
+          Open
+        </Button>
+        <Button
+          variant='ghost'
+          size='sm'
+          onClick={onSaveJson}
+          title='Save the document as JSON'
+        >
+          <Save />
+          Save
+        </Button>
 
-          <MenubarMenu>
-            <MenubarTrigger>View</MenubarTrigger>
-            <MenubarContent>
-              <MenubarRadioGroup
-                value={currentView}
-                onValueChange={(value) => {
-                  const next = viewRoutes.find((route) => route.value === value)
-                  if (next) navigate(next.path)
-                }}
+        <Divider />
+
+        <input
+          value={fileName}
+          onChange={(event) => setFileName(event.target.value)}
+          placeholder={`${moduleName}.json`}
+          aria-label='File name'
+          title='Saved under this name'
+          spellCheck={false}
+          className='hover:border-input focus:border-input focus:ring-ring/50 h-8 min-w-24 flex-1 rounded-md border border-transparent bg-transparent px-2 font-mono text-sm outline-none focus:ring-[3px]'
+        />
+
+        {/* Where the document stands against its file. Unlinked, it says why
+            nothing is being written, rather than saying nothing. */}
+        {handle ? (
+          <span
+            className={cn(
+              'shrink-0 text-xs whitespace-nowrap',
+              (SAVE_STATUS[status] ?? SAVE_STATUS.saved).className
+            )}
+            title={
+              status === 'error'
+                ? `Could not write ${handle.name}: ${saveError}`
+                : `Changes save to ${handle.name} automatically`
+            }
+          >
+            {(SAVE_STATUS[status] ?? SAVE_STATUS.saved).label}
+          </span>
+        ) : (
+          <span
+            className='text-muted-foreground shrink-0 text-xs whitespace-nowrap'
+            title={
+              canLinkFiles
+                ? 'Open or save a file to have changes save to it automatically'
+                : 'This browser cannot write back to a file: Save downloads a copy'
+            }
+          >
+            {canLinkFiles ? 'Autosave off' : 'No autosave'}
+          </span>
+        )}
+
+        <Divider />
+
+        {viewGroups.map((group, index) => (
+          <Fragment key={group[0].value}>
+            {index > 0 && <Divider />}
+            {group.map((route) => (
+              <Button
+                key={route.value}
+                variant={route.value === currentView ? 'secondary' : 'ghost'}
+                size='sm'
+                aria-current={route.value === currentView ? 'page' : undefined}
+                className={cn(
+                  route.value !== currentView && 'text-muted-foreground'
+                )}
+                onClick={() => navigate(route.path)}
+                title={route.label}
               >
-                {viewRoutes.map((route) => (
-                  <MenubarRadioItem
-                    key={route.value}
-                    value={route.value}
-                  >
-                    {route.label}
-                  </MenubarRadioItem>
-                ))}
-              </MenubarRadioGroup>
-              <MenubarSeparator />
-              <MenubarSub>
-                <MenubarSubTrigger>Theme</MenubarSubTrigger>
-                <MenubarSubContent>
-                  <MenubarRadioGroup
-                    value={theme}
-                    onValueChange={(value) => setTheme(value)}
-                  >
-                    <MenubarRadioItem value='light'>
-                      <Sun className='h-4 w-4' />
-                      Light
-                    </MenubarRadioItem>
-                    <MenubarRadioItem value='dark'>
-                      <Moon className='h-4 w-4' />
-                      Dark
-                    </MenubarRadioItem>
-                    <MenubarRadioItem value='system'>
-                      <SunMoon className='h-4 w-4' />
-                      System
-                    </MenubarRadioItem>
-                  </MenubarRadioGroup>
-                </MenubarSubContent>
-              </MenubarSub>
-            </MenubarContent>
-          </MenubarMenu>
+                <route.Icon />
+                {/* Icons alone on a narrower window, so the row still fits. */}
+                <span className='hidden xl:inline'>{route.label}</span>
+              </Button>
+            ))}
+          </Fragment>
+        ))}
 
-          <MenubarMenu>
-            <MenubarTrigger>Help</MenubarTrigger>
-            <MenubarContent>
-              <MenubarItem onClick={() => setIsAboutOpen(true)}>About</MenubarItem>
-            </MenubarContent>
-          </MenubarMenu>
-        </Menubar>
+        <Divider />
+
+        <Button
+          variant='ghost'
+          size='icon-sm'
+          onClick={() => setTheme(nextTheme.value)}
+          title={`Theme: ${themeLabel} (click for ${nextTheme.label})`}
+          aria-label={`Theme: ${themeLabel}`}
+        >
+          <ThemeIcon />
+        </Button>
+        <Button
+          variant='ghost'
+          size='icon-sm'
+          onClick={() => setIsAboutOpen(true)}
+          title='About'
+          aria-label='About'
+        >
+          <Info />
+        </Button>
       </nav>
 
       <Dialog
@@ -245,6 +363,12 @@ export const NavBar = () => {
               <p className='text-muted-foreground mt-1'>{packageInfo.version}</p>
             </div>
             <div>
+              <p className='font-medium'>License</p>
+              <p className='text-muted-foreground mt-1'>
+                AGPL-3.0-only or a separate commercial license
+              </p>
+            </div>
+            <div>
               <p className='font-medium'>Feature</p>
               <div className='text-muted-foreground mt-1 space-y-2'>
                 <p>
@@ -252,18 +376,26 @@ export const NavBar = () => {
                 </p>
                 <ul className='list-disc space-y-1 pl-5'>
                   <li>Edit registers, fields, reset values, and bit ranges</li>
+                  <li>
+                    Model RW, RO, WO, W1C, W0C, W1P, and W1SC field behaviour
+                  </li>
                   <li>Configure module name, data width, address width, and interface</li>
                   <li>Import and export project JSON files</li>
                   <li>Generate native or Avalon-MM RTL</li>
                   <li>Preview generated SystemVerilog in the RTL viewer</li>
+                  <li>
+                    Mark the quasi-static fields and generate the SDC that cuts
+                    their timing
+                  </li>
                   <li>Download the active RTL file or all generated outputs</li>
+                  <li>Export the register datasheet as PDF</li>
                 </ul>
               </div>
             </div>
             <div>
-              <p className='font-medium'>Authors</p>
+              <p className='font-medium'>Project credits</p>
               <ul className='text-muted-foreground mt-1 list-disc space-y-1 pl-5'>
-                <li>chipguys2026 (lead author)</li>
+                <li>chipguys2026 / khiemnb153 (owner and original contributor)</li>
                 <li>superzeldalink (contributor)</li>
               </ul>
             </div>

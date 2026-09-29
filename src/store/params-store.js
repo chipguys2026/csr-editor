@@ -5,6 +5,10 @@ export const useParamStore = create((set) => ({
   addrWidth: 16,
   interface: 'Native',
   moduleName: 'CSR',
+  parameters: [],
+  headerPrefix: '',
+  registeredReadback: false,
+  sdcTarget: 'synopsys',
 
   setParams: (params) => set(params),
 }))

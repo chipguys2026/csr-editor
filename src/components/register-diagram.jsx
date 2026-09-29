@@ -1,7 +1,8 @@
+import { accessColorMap } from '@/lib/access-types'
 import { cn } from '@/lib/utils'
 import { normalizeRegister } from '@/lib/register'
 
-import { Fragment } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 
 // Helpers
 const estimateMonoTextWidth = (text, fontSize) => text.length * fontSize * 0.6
@@ -22,6 +23,11 @@ const FieldRectanges = ({
   offsetX,
   offsetY,
   colorMap,
+  highlightLsb,
+  onHighlight,
+  dragLsb,
+  dropLsb,
+  onDragStart,
 }) => (
   <g>
     {fields.map((field, i) => {
@@ -29,6 +35,12 @@ const FieldRectanges = ({
 
       const x = (nbBitCell - 1 - msb) * bitCellWidth + offsetX
       const width = (msb - lsb + 1) * bitCellWidth
+      const isHighlighted = highlightLsb === lsb
+      const isDimmed = highlightLsb != null && !isHighlighted
+      // Reserved spans are gaps, not fields: nothing to pick up or drop onto.
+      const isDraggable = Boolean(onDragStart) && field.name !== 'RESERVED'
+      const isSource = dragLsb === lsb
+      const isTarget = dropLsb === lsb && !isSource
 
       return (
         <rect
@@ -38,14 +50,49 @@ const FieldRectanges = ({
           width={width}
           height={registerHeight}
           className={cn(
-            field.name === 'RESERVED' ? colorMap['RSVD'] : colorMap[field.type]
+            field.name === 'RESERVED' ? colorMap['RSVD'] : colorMap[field.type],
+            isDimmed && !isTarget && 'opacity-30',
+            (isHighlighted || isTarget) && 'stroke-foreground',
+            isSource && 'opacity-25',
+            isDraggable && (dragLsb == null ? 'cursor-grab' : 'cursor-grabbing')
           )}
-          stroke='none'
+          stroke={isHighlighted || isTarget ? undefined : 'none'}
+          strokeWidth={isHighlighted || isTarget ? 2 : undefined}
+          onMouseEnter={() => onHighlight?.(lsb)}
+          onMouseLeave={() => onHighlight?.(null)}
+          // preventDefault: a bare mousedown starts a text selection, which
+          // swallows the drag and leaves the page highlighted instead.
+          onMouseDown={
+            isDraggable
+              ? (event) => {
+                  event.preventDefault()
+                  onDragStart(lsb)
+                }
+              : undefined
+          }
         />
       )
     })}
   </g>
 )
+
+/** A translucent copy of the field being dragged, tracking the cursor. */
+const DragGhost = ({ field, x, registerHeight, bitCellWidth, offsetY, colorMap }) => {
+  const width =
+    (field.bitRange.msb - field.bitRange.lsb + 1) * bitCellWidth
+
+  return (
+    <rect
+      x={x - width / 2}
+      y={offsetY}
+      width={width}
+      height={registerHeight}
+      className={cn(colorMap[field.type], 'stroke-foreground pointer-events-none')}
+      strokeWidth={2}
+      opacity={0.85}
+    />
+  )
+}
 
 const FieldDividers = ({
   fields,
@@ -87,10 +134,14 @@ const FieldAnnotations = ({
   fieldNameSize,
   offsetX,
   offsetY,
+  highlightLsb,
+  onHighlight,
 }) => (
   <g>
     {fields.map((field, i) => {
       const { msb, lsb } = field.bitRange
+      const isHighlighted = highlightLsb === lsb
+      const isDimmed = highlightLsb != null && !isHighlighted
 
       const fieldCenterX = calcFieldCenterX(
         msb,
@@ -103,10 +154,16 @@ const FieldAnnotations = ({
       const labelY = firstLineHeight + i * gap + offsetY
 
       return (
-        <g key={`fieldAnnotation${i}`}>
+        <g
+          key={`fieldAnnotation${i}`}
+          className={cn(isDimmed && 'opacity-30')}
+          onMouseEnter={() => onHighlight?.(lsb)}
+          onMouseLeave={() => onHighlight?.(null)}
+        >
           <path
             d={`M ${fieldCenterX} ${fieldBottomY} L ${fieldCenterX} ${labelY} L ${fieldNameX - 2} ${labelY}`}
             className='stroke-foreground'
+            strokeWidth={isHighlighted ? 2 : undefined}
             fill='none'
           />
 
@@ -116,6 +173,7 @@ const FieldAnnotations = ({
             className='fill-foreground'
             fontSize={fieldNameSize}
             fontFamily='monospace'
+            fontWeight={isHighlighted ? 'bold' : undefined}
             textAnchor='start'
             dominantBaseline='middle'
           >
@@ -232,14 +290,24 @@ const RegisterFrame = ({
   )
 }
 
-export const RegisterDiagram = ({ fields, dataWidth, options }) => {
+export const RegisterDiagram = ({
+  fields,
+  dataWidth,
+  options,
+  highlightLsb = null,
+  onHighlight,
+  onMoveField,
+}) => {
+  // Press a block and it follows the cursor until release. SVG elements do not
+  // honour the HTML draggable attribute, and tracking on the window rather than
+  // on the blocks means a fast drag or a release off the diagram still lands.
+  const svgRef = useRef(null)
+  const [drag, setDrag] = useState(null)
+  // Geometry the window listeners need, kept fresh without re-binding them.
+  const geometryRef = useRef(null)
+
   const colorMap = {
-    RW: 'fill-blue-200 dark:fill-blue-400',
-    WO: 'fill-green-200 dark:fill-green-400',
-    RO: 'fill-yellow-200 dark:fill-yellow-400',
-    W1C: 'fill-pink-200 dark:fill-pink-400',
-    W0C: 'fill-rose-200 dark:fill-rose-400',
-    RSVD: 'fill-neutral-200 dark:fill-neutral-400',
+    ...accessColorMap,
     ...(options?.colorMap ?? {}),
   }
   const registerWidth = options?.registerWidth ?? 768
@@ -267,13 +335,99 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
     fields.length * indicatorGap
 
   const fullFields = normalizeRegister(fields)
+  // Label rows follow bit position, not the order fields were authored in: a
+  // leader line can only cross one from a row above it when the two are out of
+  // order, so sorting removes every crossing.
+  const annotationFields = [...fields].sort(
+    (a, b) => a.bitRange.lsb - b.bitRange.lsb
+  )
+
+  // Refreshed after each render rather than during it, so the window listeners
+  // always read current geometry without being re-bound.
+  useEffect(() => {
+    geometryRef.current = {
+      spans: fullFields,
+      svgWidth,
+      padding,
+      bitCellWidth,
+      dataWidth,
+      onMoveField,
+    }
+  })
+
+  // Only the picked-up field matters to the listeners; its position lives in
+  // state purely so the ghost re-renders.
+  const draggingLsb = drag?.lsb ?? null
+
+  useEffect(() => {
+    if (draggingLsb == null) return undefined
+
+    const svgX = (clientX) => {
+      const bounds = svgRef.current.getBoundingClientRect()
+      return (
+        (clientX - bounds.left) *
+        (geometryRef.current.svgWidth / bounds.width)
+      )
+    }
+
+    // Which bit sits under the cursor: bit 0 is drawn at the right edge.
+    const bitAt = (x) => {
+      const { padding: pad, bitCellWidth: cell, dataWidth: bits } =
+        geometryRef.current
+      return bits - 1 - Math.floor((x - pad) / cell)
+    }
+
+    // The span it falls in, which may be a reserved gap rather than a field.
+    const spanAt = (bit) =>
+      geometryRef.current.spans.find(
+        (span) => bit >= span.bitRange.lsb && bit <= span.bitRange.msb
+      )
+
+    const onMove = (event) =>
+      setDrag((current) => {
+        if (!current) return current
+
+        const x = svgX(event.clientX)
+        return {
+          ...current,
+          x,
+          dropLsb: spanAt(bitAt(x))?.bitRange.lsb ?? null,
+        }
+      })
+
+    const onUp = (event) => {
+      const bit = bitAt(svgX(event.clientX))
+      const span = spanAt(bit)
+
+      if (span && span.bitRange.lsb !== draggingLsb) {
+        geometryRef.current.onMoveField(draggingLsb, bit)
+      }
+
+      setDrag(null)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [draggingLsb])
+
+  const draggedField = drag && fields.find((f) => f.bitRange.lsb === drag.lsb)
 
   return (
     <svg
+      ref={svgRef}
       width={svgWidth}
       height={svgHeight}
       viewBox={`0 0 ${svgWidth} ${svgHeight}`}
       strokeWidth={1}
+      // select-none stops a drag across blocks from painting the labels blue;
+      // onDragStart blocks the browser's own element drag.
+      className={cn(onMoveField && 'select-none')}
+      onDragStart={(event) => event.preventDefault()}
     >
       <BitCellIndexes
         fields={fullFields}
@@ -292,6 +446,15 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
         offsetX={padding}
         offsetY={padding + indexLineHeight}
         colorMap={colorMap}
+        highlightLsb={highlightLsb}
+        onHighlight={onHighlight}
+        dragLsb={drag?.lsb ?? null}
+        dropLsb={drag?.dropLsb ?? null}
+        onDragStart={
+          onMoveField
+            ? (lsb) => setDrag({ lsb, x: null, dropLsb: lsb })
+            : undefined
+        }
       />
       <FieldDividers
         fields={fullFields}
@@ -302,7 +465,7 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
         offsetY={padding + indexLineHeight}
       />
       <FieldAnnotations
-        fields={fields}
+        fields={annotationFields}
         nbBitCell={dataWidth}
         bitCellWidth={bitCellWidth}
         firstLineHeight={firstIndicatorLineHeight}
@@ -311,6 +474,8 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
         fieldNameSize={fieldNameSize}
         offsetX={padding}
         offsetY={padding + indexLineHeight + registerHeight + 2}
+        highlightLsb={highlightLsb}
+        onHighlight={onHighlight}
       />
       <RegisterFrame
         registerWidth={registerWidth}
@@ -321,6 +486,27 @@ export const RegisterDiagram = ({ fields, dataWidth, options }) => {
         nbBitCell={dataWidth}
         dividerHeight={4} // TODO: Hardcode
       />
+
+      {/* Drawn last so it rides over the register while it follows the cursor. */}
+      {draggedField && (
+        <DragGhost
+          field={draggedField}
+          x={
+            drag.x ??
+            calcFieldCenterX(
+              draggedField.bitRange.msb,
+              draggedField.bitRange.lsb,
+              dataWidth,
+              bitCellWidth,
+              padding
+            )
+          }
+          registerHeight={registerHeight}
+          bitCellWidth={bitCellWidth}
+          offsetY={padding + indexLineHeight}
+          colorMap={colorMap}
+        />
+      )}
     </svg>
   )
 }
