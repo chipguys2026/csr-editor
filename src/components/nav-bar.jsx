@@ -363,6 +363,12 @@ export const NavBar = () => {
               <p className='text-muted-foreground mt-1'>{packageInfo.version}</p>
             </div>
             <div>
+              <p className='font-medium'>License</p>
+              <p className='text-muted-foreground mt-1'>
+                AGPL-3.0-only or a separate commercial license
+              </p>
+            </div>
+            <div>
               <p className='font-medium'>Feature</p>
               <div className='text-muted-foreground mt-1 space-y-2'>
                 <p>
@@ -387,9 +393,9 @@ export const NavBar = () => {
               </div>
             </div>
             <div>
-              <p className='font-medium'>Authors</p>
+              <p className='font-medium'>Project credits</p>
               <ul className='text-muted-foreground mt-1 list-disc space-y-1 pl-5'>
-                <li>chipguys2026 (lead author)</li>
+                <li>chipguys2026 / khiemnb153 (owner and original contributor)</li>
                 <li>superzeldalink (contributor)</li>
               </ul>
             </div>

@@ -1,3 +1,4 @@
+// Generated output permission: see OUTPUT-EXCEPTION.md at the project root.
 import { accessFillOf } from './access-types.js'
 import { buildDocument } from './csr-document.js'
 import { normalizeRegister } from './register.js'

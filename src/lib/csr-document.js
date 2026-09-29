@@ -1,3 +1,4 @@
+// Generated output permission: see OUTPUT-EXCEPTION.md at the project root.
 import { accessTypes, holdCyclesOf } from './access-types.js'
 import {
   formatArrayAddress,

@@ -1,3 +1,4 @@
+// Generated output permission: see OUTPUT-EXCEPTION.md at the project root.
 import * as XLSX from 'xlsx-js-style'
 
 import {

@@ -1,3 +1,4 @@
+// Generated output permission: see OUTPUT-EXCEPTION.md at the project root.
 import { quasiStaticBlocker } from './access-types.js'
 import { buildRegisterModel } from './csr-rtl.js'
 
