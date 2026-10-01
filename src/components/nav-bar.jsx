@@ -183,7 +183,9 @@ export const NavBar = () => {
         link(next, documentKey())
       } else {
         unlink()
-        toast.warning(`Opened ${next.name} read-only: changes will not save to it`)
+        toast.warning(
+          `Opened ${next.name} read-only: changes will not save to it`
+        )
       }
     } catch (error) {
       console.error(error)
@@ -217,7 +219,7 @@ export const NavBar = () => {
 
   return (
     <>
-      <nav className='flex flex-row items-center gap-1 border-b p-2'>
+      <nav className='flex flex-row items-center gap-1 px-4 py-3'>
         <h1 className='mr-3 font-bold whitespace-nowrap'>CSR Editor</h1>
         <input
           ref={fileInputRef}
@@ -360,7 +362,9 @@ export const NavBar = () => {
             </p>
             <div>
               <p className='font-medium'>Version</p>
-              <p className='text-muted-foreground mt-1'>{packageInfo.version}</p>
+              <p className='text-muted-foreground mt-1'>
+                {packageInfo.version}
+              </p>
             </div>
             <div>
               <p className='font-medium'>License</p>
@@ -371,15 +375,16 @@ export const NavBar = () => {
             <div>
               <p className='font-medium'>Feature</p>
               <div className='text-muted-foreground mt-1 space-y-2'>
-                <p>
-                  Create and manage CSR designs end to end in the browser.
-                </p>
+                <p>Create and manage CSR designs end to end in the browser.</p>
                 <ul className='list-disc space-y-1 pl-5'>
                   <li>Edit registers, fields, reset values, and bit ranges</li>
                   <li>
                     Model RW, RO, WO, W1C, W0C, W1P, and W1SC field behaviour
                   </li>
-                  <li>Configure module name, data width, address width, and interface</li>
+                  <li>
+                    Configure module name, data width, address width, and
+                    interface
+                  </li>
                   <li>Import and export project JSON files</li>
                   <li>Generate native or Avalon-MM RTL</li>
                   <li>Preview generated SystemVerilog in the RTL viewer</li>
@@ -395,7 +400,9 @@ export const NavBar = () => {
             <div>
               <p className='font-medium'>Project credits</p>
               <ul className='text-muted-foreground mt-1 list-disc space-y-1 pl-5'>
-                <li>chipguys2026 / khiemnb153 (owner and original contributor)</li>
+                <li>
+                  chipguys2026 / khiemnb153 (owner and original contributor)
+                </li>
                 <li>superzeldalink (contributor)</li>
               </ul>
             </div>
