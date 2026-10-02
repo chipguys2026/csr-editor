@@ -21,7 +21,7 @@ synthesizable RTL, a C header, timing constraints, a spreadsheet and a datasheet
 
 ## Getting started
 
-Requires Node.js 20+.
+Requires Node.js 22.13+ (PDF.js requirement).
 
 ```sh
 npm install
@@ -67,7 +67,7 @@ A CSR document is a JSON file:
 
 ## Tech stack
 
-React 19, Vite, Tailwind CSS, Radix UI, Zustand, pdfmake, xlsx-js-style.
+React 19, Vite, Tailwind CSS, Radix UI, Zustand, @react-pdf/renderer, xlsx-js-style.
 
 ## Project credits
 

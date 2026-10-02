@@ -1,438 +1,540 @@
 // Generated output permission: see OUTPUT-EXCEPTION.md at the project root.
-import { accessFillOf } from './access-types.js'
-import { buildDocument } from './csr-document.js'
+import { createElement as h } from 'react'
+import {
+  Document,
+  Page,
+  View,
+  Text,
+  Link,
+  Svg,
+  Rect,
+  Line,
+  Polyline,
+  pdf,
+} from '@react-pdf/renderer'
 import { normalizeRegister } from './register.js'
+import { accessPdfStyleOf, tw } from './pdf-styles.js'
 
-/**
- * The register datasheet as a pdfmake document definition: the same model the
- * document page renders, laid out for paper. Pure data, so the browser and the
- * headless generator build the identical file; only the rendering differs.
- *
- * Fonts are the PDF standard ones (Helvetica, Courier), which every reader
- * already has, so the file embeds no font and stays small.
- */
-
+// React elements without JSX keep the document usable by the native Node CLI.
+const PAGE_WIDTH = 515.28
 const MAP_ID = 'register-map'
+const mono = tw('font-mono')
+const muted = tw('text-neutral-500')
+const link = tw('text-blue-600 no-underline')
+const pageStyle = {
+  ...tw('font-sans text-neutral-900'),
+  padding: 40,
+  paddingTop: 72,
+  paddingBottom: 52,
+  fontSize: 9,
+}
 
-const escapeXml = (text) =>
-  String(text).replace(
-    /[<>&"']/g,
-    (ch) =>
-      ({
-        '<': '&lt;',
-        '>': '&gt;',
-        '&': '&amp;',
-        '"': '&quot;',
-        "'": '&apos;',
-      })[ch]
+const Header = ({ title }) =>
+  h(Text, {
+    fixed: true,
+    style: {
+      ...muted,
+      position: 'absolute',
+      top: 28,
+      left: 40,
+      right: 40,
+      fontSize: 8,
+      borderBottomWidth: 0.5,
+      borderColor: tw('border-neutral-400').borderColor,
+      paddingBottom: 6,
+    },
+    children: `${title} Register Specification`,
+  })
+
+const Footer = ({ date }) =>
+  h(
+    View,
+    {
+      fixed: true,
+      style: {
+        ...tw('flex-row justify-between text-neutral-500'),
+        position: 'absolute',
+        bottom: 22,
+        left: 40,
+        right: 40,
+        fontSize: 8,
+      },
+    },
+    h(
+      Text,
+      { style: { maxWidth: 440 } },
+      `Generated ${date} by CSR Editor from ChipGuys`
+    ),
+    h(Text, {
+      render: ({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`,
+    })
   )
 
-/**
- * The bit diagram, drawn the way the editor draws it: the register as a row of
- * bit cells, MSB on the left, each field's boundary bits numbered above and its
- * name hung off a leader line to the right. In points, sized to the page.
- */
-export const registerDiagramSvg = (fields, dataWidth, width = 515) => {
-  const pad = 2
-  const indexRow = 12
-  const barHeight = 22
-  const firstGap = 14
-  const gap = 11
-  const fontSize = 7
+const Heading = ({ id, children, onPage, level = 2 }) =>
+  h(Text, {
+    id,
+    bookmark: String(children),
+    minPresenceAhead: 24,
+    style: {
+      ...tw('font-bold'),
+      fontSize: level === 1 ? 20 : 14,
+      marginTop: level === 1 ? 0 : 12,
+      marginBottom: 6,
+    },
+    render: ({ pageNumber }) => {
+      onPage(id, pageNumber)
+      return children
+    },
+  })
 
+/** A table assembled from PDF primitives, with rows kept together when possible. */
+const Table = ({
+  headers,
+  widths,
+  rows,
+  repeatHeader = false,
+  allowRowWrap = false,
+}) => {
+  const cells = (values, header = false) =>
+    values.map((value, column) =>
+      h(
+        View,
+        {
+          key: column,
+          style: {
+            borderRightWidth: column === widths.length - 1 ? 0 : 0.5,
+            borderColor: tw('border-neutral-400').borderColor,
+            paddingHorizontal: 4,
+            paddingVertical: 3,
+            minWidth: 0,
+            ...(widths[column] === '*'
+              ? { flexGrow: 1, flexBasis: 0 }
+              : { width: widths[column], flexShrink: 0 }),
+            ...(header ? tw('bg-neutral-100 font-bold') : {}),
+          },
+        },
+        typeof value === 'string' || typeof value === 'number'
+          ? h(Text, null, String(value))
+          : value
+      )
+    )
+
+  const rowStyle = {
+    ...tw('flex-row'),
+    borderBottomWidth: 0.5,
+    borderColor: tw('border-neutral-400').borderColor,
+  }
+  return h(
+    View,
+    {
+      style: {
+        borderTopWidth: 0.5,
+        borderLeftWidth: 0.5,
+        borderRightWidth: 0.5,
+        borderColor: tw('border-neutral-400').borderColor,
+        fontSize: 8,
+      },
+    },
+    headers &&
+      h(
+        View,
+        {
+          fixed: repeatHeader,
+          wrap: false,
+          minPresenceAhead: 18,
+          style: rowStyle,
+        },
+        ...cells(headers, true)
+      ),
+    ...rows.map((values, index) =>
+      h(
+        View,
+        {
+          key: index,
+          wrap: allowRowWrap,
+          minPresenceAhead: 18,
+          style: rowStyle,
+        },
+        ...cells(values)
+      )
+    )
+  )
+}
+
+/** Vector diagram: bit positions, reserved gaps, field boundaries and leaders. */
+const RegisterDiagram = ({ fields, dataWidth }) => {
+  const pad = 2
+  const fontSize = 7
   const named = [...fields].sort((a, b) => a.bitRange.lsb - b.bitRange.lsb)
-  const nameWidth = Math.max(
+  const maxNameWidth = Math.max(
     0,
     ...named.map((field) => field.name.length * fontSize * 0.6)
   )
-  // The bar takes what the names leave, and no more than the page gives.
-  const barWidth = Math.min(width - nameWidth - pad * 2 - 6, 400)
+  // Scale long labels with the diagram instead of allowing a negative bar width.
+  const width = Math.max(PAGE_WIDTH, maxNameWidth + 180)
+  const barWidth = Math.min(width - maxNameWidth - pad * 2 - 6, 400)
   const cell = barWidth / dataWidth
-  const barTop = pad + indexRow
-  const height = barTop + barHeight + firstGap + named.length * gap + pad
-
+  const barTop = 14
+  const barHeight = 22
+  const height = barTop + barHeight + 14 + named.length * 11 + pad
   const bitX = (bit) => pad + (dataWidth - 1 - bit) * cell
-  const parts = []
-
   const spans = normalizeRegister(fields, dataWidth)
-
-  for (const span of spans) {
-    const { msb, lsb } = span.bitRange
-    const fill = accessFillOf(span.type, span.name === 'RESERVED')
-
-    parts.push(
-      `<rect x="${bitX(msb)}" y="${barTop}" width="${(msb - lsb + 1) * cell}" height="${barHeight}" fill="${fill}"/>`
-    )
-  }
-
-  // A tick per bit, top and bottom, so a width can be counted off the page.
-  for (let bit = 1; bit < dataWidth; bit += 1) {
-    const x = pad + bit * cell
-    parts.push(
-      `<line x1="${x}" y1="${barTop}" x2="${x}" y2="${barTop + 3}" stroke="#404040" stroke-width="0.4"/>`,
-      `<line x1="${x}" y1="${barTop + barHeight - 3}" x2="${x}" y2="${barTop + barHeight}" stroke="#404040" stroke-width="0.4"/>`
-    )
-  }
-
-  // Field boundaries full height, and the boundary bits numbered above them.
+  const stroke = tw('text-neutral-700').color
+  const shapes = []
   const numbered = new Set()
+
   for (const span of spans) {
     const { msb, lsb } = span.bitRange
-
-    if (msb !== dataWidth - 1) {
-      const x = bitX(msb)
-      parts.push(
-        `<line x1="${x}" y1="${barTop}" x2="${x}" y2="${barTop + barHeight}" stroke="#171717" stroke-width="0.8"/>`
+    shapes.push(
+      h(Rect, {
+        key: `fill-${lsb}`,
+        x: bitX(msb),
+        y: barTop,
+        width: (msb - lsb + 1) * cell,
+        height: barHeight,
+        fill: accessPdfStyleOf(span.type, span.name === 'RESERVED')
+          .backgroundColor,
+      })
+    )
+    if (msb !== dataWidth - 1)
+      shapes.push(
+        h(Line, {
+          key: `boundary-${lsb}`,
+          x1: bitX(msb),
+          x2: bitX(msb),
+          y1: barTop,
+          y2: barTop + barHeight,
+          stroke,
+          strokeWidth: 0.8,
+        })
       )
-    }
-
     for (const bit of [msb, lsb]) {
       if (numbered.has(bit)) continue
       numbered.add(bit)
-      parts.push(
-        `<text x="${bitX(bit) + cell / 2}" y="${barTop - 3}" font-size="${fontSize}" font-family="Courier" text-anchor="middle">${bit}</text>`
+      shapes.push(
+        h(
+          Text,
+          {
+            key: `bit-${bit}`,
+            x: bitX(bit) + cell / 2,
+            y: barTop - 3,
+            fontFamily: 'Courier',
+            fontSize,
+            textAnchor: 'middle',
+          },
+          String(bit)
+        )
       )
     }
   }
-
-  parts.push(
-    `<rect x="${pad}" y="${barTop}" width="${barWidth}" height="${barHeight}" fill="none" stroke="#171717" stroke-width="0.8"/>`
+  for (let bit = 1; bit < dataWidth; bit += 1) {
+    const x = pad + bit * cell
+    shapes.push(
+      h(Line, {
+        key: `top-${bit}`,
+        x1: x,
+        x2: x,
+        y1: barTop,
+        y2: barTop + 3,
+        stroke,
+        strokeWidth: 0.4,
+      })
+    )
+    shapes.push(
+      h(Line, {
+        key: `bottom-${bit}`,
+        x1: x,
+        x2: x,
+        y1: barTop + barHeight - 3,
+        y2: barTop + barHeight,
+        stroke,
+        strokeWidth: 0.4,
+      })
+    )
+  }
+  shapes.push(
+    h(Rect, {
+      key: 'frame',
+      x: pad,
+      y: barTop,
+      width: barWidth,
+      height: barHeight,
+      fill: 'none',
+      stroke,
+      strokeWidth: 0.8,
+    })
   )
-
-  // Rows follow bit position, so no leader crosses another.
   named.forEach((field, row) => {
     const { msb, lsb } = field.bitRange
     const x = (bitX(msb) + bitX(lsb) + cell) / 2
-    const y = barTop + barHeight + firstGap + row * gap
+    const y = barTop + barHeight + 14 + row * 11
     const end = pad + barWidth + 2
-
-    parts.push(
-      `<polyline points="${x},${barTop + barHeight} ${x},${y} ${end},${y}" fill="none" stroke="#404040" stroke-width="0.6"/>`,
-      `<text x="${end + 2}" y="${y + fontSize / 2 - 1}" font-size="${fontSize + 1}" font-family="Courier">${escapeXml(field.name)}</text>`
+    shapes.push(
+      h(Polyline, {
+        key: `leader-${lsb}`,
+        points: `${x},${barTop + barHeight} ${x},${y} ${end},${y}`,
+        fill: 'none',
+        stroke,
+        strokeWidth: 0.6,
+      })
+    )
+    shapes.push(
+      h(
+        Text,
+        {
+          key: `name-${lsb}`,
+          x: end + 2,
+          y: y + fontSize / 2 - 1,
+          fontSize: fontSize + 1,
+          fontFamily: 'Courier',
+        },
+        field.name
+      )
     )
   })
-
-  return {
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join('')}</svg>`,
-    width,
-    height,
-  }
-}
-
-const th = (text) => ({ text, style: 'th' })
-
-const tableLayout = {
-  hLineWidth: () => 0.5,
-  vLineWidth: () => 0.5,
-  hLineColor: () => '#a3a3a3',
-  vLineColor: () => '#a3a3a3',
-  fillColor: (row, node) =>
-    row < (node.table.headerRows ?? 0) ? '#f0f0f0' : null,
-  paddingLeft: () => 4,
-  paddingRight: () => 4,
-  paddingTop: () => 2,
-  paddingBottom: () => 2,
-}
-
-const fieldDescription = (row) => {
-  if (row.reserved) return { text: 'Reserved', color: '#737373' }
-
-  return {
-    stack: [
-      ...(row.description ? [{ text: row.description }] : []),
-      ...row.notes.map((note) => ({
-        text: note,
-        italics: true,
-        color: '#525252',
-      })),
-      ...row.enumValues.map((entry) => ({
-        text: [
-          { text: entry.label, font: 'Courier' },
-          ' = ',
-          { text: entry.name, font: 'Courier', bold: true },
-          entry.description ? ` - ${entry.description}` : '',
-        ],
-      })),
-    ],
-  }
-}
-
-const registerSection = (reg, dataWidth) => {
-  const diagram = registerDiagramSvg(reg.diagramFields, dataWidth)
-  const mono = (text, extra = {}) => ({ text, font: 'Courier', ...extra })
-
-  return [
+  const scale = Math.min(PAGE_WIDTH / width, 580 / height, 1)
+  return h(
+    Svg,
     {
-      // Heading, prose and diagram as one unbreakable block: a page that ends
-      // on a register name with its bits overleaf reads as a missing register.
-      unbreakable: true,
-      stack: [
-        {
-          id: reg.id,
-          text: reg.name,
-          style: 'h3',
-          // A bookmark under Registers, so the reader's sidebar lists them.
-          outline: true,
-          outlineParentId: 'registers',
+      width: width * scale,
+      height: height * scale,
+      viewBox: `0 0 ${width} ${height}`,
+      style: { marginBottom: 8 },
+    },
+    ...shapes
+  )
+}
+
+const FieldDescription = ({ row }) =>
+  row.reserved
+    ? h(Text, { style: muted }, 'Reserved')
+    : h(
+        View,
+        null,
+        row.description && h(Text, null, row.description),
+        ...row.notes.map((note, i) =>
+          h(
+            Text,
+            { key: `note-${i}`, style: { ...muted, fontStyle: 'italic' } },
+            note
+          )
+        ),
+        ...row.enumValues.map((entry, i) =>
+          h(
+            Text,
+            { key: `enum-${i}` },
+            h(Text, { style: mono }, `${entry.label} = `),
+            h(Text, { style: { ...mono, fontWeight: 'bold' } }, entry.name),
+            entry.description ? ` - ${entry.description}` : ''
+          )
+        )
+      )
+
+const RegisterPage = ({ reg, title, date, dataWidth, onPage }) =>
+  h(
+    Page,
+    {
+      size: 'A4',
+      style: { ...pageStyle, paddingTop: 118 },
+      bookmark: { title: reg.name, fit: true },
+    },
+    h(Header, { title }),
+    h(
+      View,
+      {
+        fixed: true,
+        style: {
+          position: 'absolute',
+          top: 64,
+          left: 40,
+          right: 40,
+          borderBottomWidth: 0.5,
+          borderColor: tw('border-neutral-400').borderColor,
+          paddingBottom: 6,
         },
-        {
-          columns: [
-            mono(`${reg.address}${reg.range ? ` (${reg.range})` : ''}`, {
-              color: '#525252',
-            }),
-            mono(`Reset ${reg.resetValue}`, {
-              color: '#525252',
-              alignment: 'right',
-            }),
-          ],
-          fontSize: 9,
-          margin: [0, 0, 0, 4],
-        },
-        {
-          canvas: [
+      },
+      h(
+        Text,
+        { style: { ...mono, fontSize: 12, fontWeight: 'bold' } },
+        reg.name
+      ),
+      h(
+        View,
+        { style: tw('flex-row justify-between') },
+        h(
+          Text,
+          { style: { ...mono, ...muted, maxWidth: 370, fontSize: 8 } },
+          `${reg.address}${reg.range ? ` (${reg.range})` : ''}`
+        ),
+        h(
+          Text,
+          { style: { ...mono, ...muted, fontSize: 8 } },
+          `Reset ${reg.resetValue}`
+        )
+      )
+    ),
+    // A single non-fixed destination keeps links on the first page even when
+    // the register heading is repeated on continuation pages.
+    h(Text, {
+      id: reg.id,
+      style: {
+        position: 'absolute',
+        top: 64,
+        left: 40,
+        fontSize: 1,
+        height: 1,
+      },
+      render: ({ pageNumber }) => {
+        onPage(reg.id, pageNumber)
+        return ' '
+      },
+    }),
+    reg.description && h(Text, { style: { marginBottom: 8 } }, reg.description),
+    h(RegisterDiagram, { fields: reg.diagramFields, dataWidth }),
+    h(Table, {
+      headers: ['Bits', 'Field', 'Access', 'Reset', 'Description'],
+      widths: [48, 90, 44, 50, '*'],
+      repeatHeader: true,
+      allowRowWrap: true,
+      rows: reg.rows.map((row) => [
+        h(Text, { style: [mono, row.reserved && muted] }, row.bits),
+        h(Text, { style: [mono, row.reserved && muted] }, row.name),
+        h(Text, { style: [mono, row.reserved && muted] }, row.access),
+        h(Text, { style: [mono, row.reserved && muted] }, row.reset),
+        h(FieldDescription, { row }),
+      ]),
+    }),
+    h(
+      Link,
+      { src: `#${MAP_ID}`, style: { ...link, fontSize: 8, marginTop: 6 } },
+      'Back to register map'
+    ),
+    h(Footer, { date })
+  )
+
+/** The exact document used by the browser preview, download, and Node CLI. */
+export const RegisterPdfDocument = ({
+  doc,
+  dataWidth,
+  date,
+  pageNumbers = {},
+  onPage = () => {},
+}) =>
+  h(
+    Document,
+    {
+      title: `${doc.title} Register Specification`,
+      creator: 'CSR Editor from ChipGuys',
+    },
+    h(
+      Page,
+      { size: 'A4', style: pageStyle },
+      h(Header, { title: doc.title }),
+      h(
+        Heading,
+        { id: 'overview', level: 1, onPage },
+        `${doc.title} Register Specification`
+      ),
+      h(Table, {
+        widths: [110, '*'],
+        rows: doc.summary.map(([label, value]) => [
+          h(Text, { style: tw('font-bold') }, label),
+          h(Text, { style: mono }, value),
+        ]),
+      }),
+      doc.parameters.length > 0 &&
+        h(
+          View,
+          null,
+          h(Heading, { id: 'parameters', onPage }, 'Parameters'),
+          h(Table, {
+            headers: ['Name', 'Default'],
+            widths: [160, '*'],
+            rows: doc.parameters.map((entry) => [
+              h(Text, { style: mono }, entry.name),
+              h(Text, { style: mono }, entry.value),
+            ]),
+          })
+        ),
+      h(Heading, { id: 'access-types', onPage }, 'Access Types'),
+      h(Table, {
+        widths: [48, '*'],
+        rows: doc.accessTypes.map((entry) => [
+          h(
+            Text,
             {
-              type: 'line',
-              x1: 0,
-              y1: 0,
-              x2: 515,
-              y2: 0,
-              lineWidth: 0.5,
-              lineColor: '#a3a3a3',
+              style: {
+                ...mono,
+                ...tw('font-bold'),
+                ...accessPdfStyleOf(entry.type),
+                padding: 2,
+              },
             },
-          ],
-          margin: [0, 0, 0, 6],
-        },
-        ...(reg.description
-          ? [{ text: reg.description, margin: [0, 0, 0, 6] }]
-          : []),
-        {
-          svg: diagram.svg,
-          width: diagram.width,
-          font: 'Courier',
-          margin: [0, 0, 0, 6],
-        },
-      ],
-    },
-    {
-      table: {
-        headerRows: 1,
-        dontBreakRows: true,
-        widths: [48, 90, 36, 44, '*'],
-        body: [
-          [
-            th('Bits'),
-            th('Field'),
-            th('Access'),
-            th('Reset'),
-            th('Description'),
-          ],
-          ...reg.rows.map((row) => {
-            const color = row.reserved ? '#737373' : undefined
-            return [
-              mono(row.bits, { color }),
-              mono(row.name, { color }),
-              mono(row.access, { color }),
-              mono(row.reset, { color }),
-              fieldDescription(row),
-            ]
-          }),
-        ],
-      },
-      layout: tableLayout,
-      fontSize: 8,
-    },
-    {
-      text: 'Back to register map',
-      linkToDestination: MAP_ID,
-      color: '#2563eb',
-      fontSize: 8,
-      margin: [0, 4, 0, 18],
-    },
-  ]
-}
-
-/**
- * The pdfmake document definition for a register map.
- * @param {object} params - Document parameters
- * @param {object} registers - Register map, keyed by address
- * @param {object} [options]
- * @param {Date} [options.date] - Generation date printed on the cover
- */
-export const buildPdfDefinition = (
-  params = {},
-  registers = {},
-  options = {}
-) => {
-  const doc = buildDocument(params, registers)
-  const dataWidth = Number(params.dataWidth ?? 32)
-  const date = (options.date ?? new Date()).toISOString().slice(0, 10)
-  const mono = (text) => ({ text, font: 'Courier' })
-
-  const heading = (text, id) => ({
-    text,
-    id,
-    style: 'h2',
-    outline: true,
-  })
-
-  const content = [
-    { text: `${doc.title} Register Specification`, style: 'h1' },
-    {
-      text: `Generated ${date} by csr-editor`,
-      color: '#737373',
-      margin: [0, 0, 0, 12],
-    },
-    {
-      table: {
-        widths: [90, 'auto'],
-        body: doc.summary.map(([label, value]) => [th(label), mono(value)]),
-      },
-      layout: {
-        ...tableLayout,
-        fillColor: (_row, _node, col) => (col === 0 ? '#f0f0f0' : null),
-      },
-      margin: [0, 0, 0, 16],
-    },
-  ]
-
-  if (doc.parameters.length > 0) {
-    content.push(heading('Parameters', 'parameters'), {
-      table: {
-        headerRows: 1,
-        widths: ['auto', 'auto'],
-        body: [
-          [th('Name'), th('Default')],
-          ...doc.parameters.map((entry) => [
-            mono(entry.name),
-            mono(entry.value),
-          ]),
-        ],
-      },
-      layout: tableLayout,
-      margin: [0, 0, 0, 16],
-    })
-  }
-
-  if (doc.accessTypes.length > 0) {
-    content.push(heading('Access Types', 'access-types'), {
-      table: {
-        widths: [40, '*'],
-        body: doc.accessTypes.map((entry) => [
-          {
-            text: entry.type,
-            font: 'Courier',
-            bold: true,
-            fillColor: accessFillOf(entry.type),
-          },
+            entry.type
+          ),
           entry.description,
         ]),
-      },
-      layout: tableLayout,
-      margin: [0, 0, 0, 16],
-    })
-  }
-
-  content.push(heading('Register Map', MAP_ID))
-
-  if (doc.registers.length === 0) {
-    content.push({ text: 'No registers defined.', color: '#737373' })
-  } else {
-    content.push({
-      table: {
-        headerRows: 1,
-        dontBreakRows: true,
-        // Sized to what they hold; the description takes the rest of the line.
-        widths: ['auto', 'auto', 'auto', '*', 'auto'],
-        body: [
-          [
-            th('Address'),
-            th('Register'),
-            th('Reset'),
-            th('Description'),
-            th('Page'),
-          ],
-          ...doc.registers.map((reg) => [
-            {
-              stack: [
-                mono(reg.address),
-                ...(reg.range
-                  ? [
-                      {
-                        text: reg.range,
-                        font: 'Courier',
-                        fontSize: 7,
-                        color: '#737373',
-                      },
-                    ]
-                  : []),
-              ],
-            },
-            {
-              text: reg.name,
-              font: 'Courier',
-              color: '#2563eb',
-              linkToDestination: reg.id,
-            },
-            mono(reg.resetValue),
-            // First line only: the full text is in the register's own section.
-            reg.description.split('\n')[0],
-            {
-              pageReference: reg.id,
-              linkToDestination: reg.id,
-              alignment: 'right',
-            },
-          ]),
-        ],
-      },
-      layout: tableLayout,
-      fontSize: 8,
-    })
-
-    content.push(
-      { text: '', pageBreak: 'after' },
-      { ...heading('Registers', 'registers'), outlineExpanded: true },
-      ...doc.registers.flatMap((reg) => registerSection(reg, dataWidth))
+      }),
+      h(Heading, { id: MAP_ID, onPage }, 'Register Map'),
+      doc.registers.length === 0
+        ? h(Text, { style: muted }, 'No registers defined.')
+        : h(Table, {
+            headers: ['Address', 'Register', 'Reset', 'Description', 'Page'],
+            widths: [95, 105, 75, '*', 28],
+            rows: doc.registers.map((reg) => [
+              h(
+                View,
+                null,
+                h(Text, { style: mono }, reg.address),
+                reg.range &&
+                  h(Text, { style: { ...muted, fontSize: 7 } }, reg.range)
+              ),
+              h(
+                Link,
+                { src: `#${reg.id}`, style: { ...mono, ...link } },
+                reg.name
+              ),
+              h(Text, { style: mono }, reg.resetValue),
+              reg.description.split('\n')[0],
+              h(
+                Link,
+                {
+                  src: `#${reg.id}`,
+                  style: { ...mono, ...link, textAlign: 'right' },
+                },
+                String(pageNumbers[reg.id] ?? '-')
+              ),
+            ]),
+          }),
+      h(Footer, { date })
+    ),
+    ...doc.registers.map((reg) =>
+      h(RegisterPage, { key: reg.id, reg, title: doc.title, date, dataWidth, onPage })
     )
-  }
+  )
 
-  return {
-    info: {
-      title: `${doc.title} Register Specification`,
-      creator: 'csr-editor',
-    },
-    pageSize: 'A4',
-    pageMargins: [40, 40, 40, 44],
-    content,
-    footer: (page, pages) => ({
-      columns: [
-        { text: `${doc.title} Register Specification`, color: '#737373' },
-        { text: `${page} / ${pages}`, alignment: 'right', color: '#737373' },
-      ],
-      fontSize: 8,
-      margin: [40, 14, 40, 0],
-    }),
-    defaultStyle: { font: 'Helvetica', fontSize: 9, lineHeight: 1.15 },
-    styles: {
-      h1: { fontSize: 20, bold: true, margin: [0, 0, 0, 4] },
-      h2: { fontSize: 14, bold: true, margin: [0, 8, 0, 6] },
-      h3: { fontSize: 12, bold: true, font: 'Courier', margin: [0, 0, 0, 2] },
-      th: { bold: true, fontSize: 8 },
-    },
+/**
+ * Resolve destination pages, then render the page-reference column. A bounded
+ * extra pass covers a digit-width change that might affect pagination.
+ */
+export const renderRegisterPdf = async (doc, dataWidth, options = {}) => {
+  const date = (options.date ?? new Date()).toISOString().slice(0, 10)
+  let pageNumbers = {}
+  for (let pass = 0; pass < 4; pass += 1) {
+    const resolved = {}
+    const element = h(RegisterPdfDocument, {
+      doc,
+      dataWidth,
+      date,
+      pageNumbers,
+      onPage: (id, pageNumber) => {
+        resolved[id] = pageNumber
+      },
+    })
+    const blob = await pdf(element).toBlob()
+    if (Object.keys(resolved).every((id) => resolved[id] === pageNumbers[id]))
+      return { blob, pageNumbers: resolved }
+    pageNumbers = resolved
   }
-}
-
-/** Fonts the definition uses: the PDF standard families, nothing embedded. */
-export const PDF_FONTS = {
-  Helvetica: {
-    normal: 'Helvetica',
-    bold: 'Helvetica-Bold',
-    italics: 'Helvetica-Oblique',
-    bolditalics: 'Helvetica-BoldOblique',
-  },
-  Courier: {
-    normal: 'Courier',
-    bold: 'Courier-Bold',
-    italics: 'Courier-Oblique',
-    bolditalics: 'Courier-BoldOblique',
-  },
+  throw new Error('PDF page references did not converge')
 }

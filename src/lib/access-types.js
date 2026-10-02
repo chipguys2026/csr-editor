@@ -100,39 +100,22 @@ export const accessTypeMap = Object.fromEntries(
 export const isAccessType = (value) =>
   Object.prototype.hasOwnProperty.call(accessTypeMap, value)
 
-/** Tailwind fills used by the register diagram, keyed by access type. */
-export const accessColorMap = {
-  RW: 'fill-blue-200 dark:fill-blue-400',
-  RO: 'fill-yellow-200 dark:fill-yellow-400',
-  WO: 'fill-green-200 dark:fill-green-400',
-  W1C: 'fill-pink-200 dark:fill-pink-400',
-  W1S: 'fill-teal-200 dark:fill-teal-400',
-  W0C: 'fill-rose-200 dark:fill-rose-400',
-  W1P: 'fill-purple-200 dark:fill-purple-400',
-  W1SC: 'fill-orange-200 dark:fill-orange-400',
-  RSVD: 'fill-neutral-200 dark:fill-neutral-400',
-}
-
 /**
- * The same fills as plain colours, for what cannot take a Tailwind class: the
- * PDF, and the document page's access type key, which is coloured as the
- * diagrams are so it reads as their legend.
+ * Tailwind colours keyed by access type. The editor uses fill utilities;
+ * React PDF converts the light background utilities into legend and SVG fills.
+ * Keep the class names here so exports do not need a separate hex palette.
  */
-export const accessFillHex = {
-  RW: '#bfdbfe',
-  RO: '#fef08a',
-  WO: '#bbf7d0',
-  W1C: '#fbcfe8',
-  W1S: '#99f6e4',
-  W0C: '#fecdd3',
-  W1P: '#e9d5ff',
-  W1SC: '#fed7aa',
-  RSVD: '#e5e5e5',
+export const accessColorMap = {
+  RW: 'fill-blue-200 bg-blue-200 dark:fill-blue-400 dark:bg-blue-400',
+  RO: 'fill-yellow-200 bg-yellow-200 dark:fill-yellow-400 dark:bg-yellow-400',
+  WO: 'fill-green-200 bg-green-200 dark:fill-green-400 dark:bg-green-400',
+  W1C: 'fill-pink-200 bg-pink-200 dark:fill-pink-400 dark:bg-pink-400',
+  W1S: 'fill-teal-200 bg-teal-200 dark:fill-teal-400 dark:bg-teal-400',
+  W0C: 'fill-rose-200 bg-rose-200 dark:fill-rose-400 dark:bg-rose-400',
+  W1P: 'fill-purple-200 bg-purple-200 dark:fill-purple-400 dark:bg-purple-400',
+  W1SC: 'fill-orange-200 bg-orange-200 dark:fill-orange-400 dark:bg-orange-400',
+  RSVD: 'fill-neutral-200 bg-neutral-200 dark:fill-neutral-400 dark:bg-neutral-400',
 }
-
-/** The fill for a field, reserved bits in the neutral one. */
-export const accessFillOf = (access, reserved = false) =>
-  reserved ? accessFillHex.RSVD : (accessFillHex[access] ?? accessFillHex.RSVD)
 
 /**
  * Clocks a W1SC field stays asserted before it clears itself. Per field, since
