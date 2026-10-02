@@ -56,7 +56,7 @@ export const ViewShell = ({
   const sidebarSize = useSidebarSize(layoutKey)
 
   return (
-    <div className='flex flex-1 flex-col gap-4 overflow-auto p-4'>
+    <div className='flex flex-1 flex-col gap-4 overflow-auto p-2 pt-0'>
       {error ? (
         <div className='rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300'>
           {error}

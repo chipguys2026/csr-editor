@@ -33,7 +33,7 @@ const HomePage = () => {
   // The same frame as the output views: a card inset from the window, the
   // sidebar headings set as their sidebar title is.
   return (
-    <div className='flex flex-1 flex-col gap-4 overflow-auto p-4'>
+    <div className='flex flex-1 flex-col gap-4 overflow-auto p-2 pt-0'>
       <section className='bg-card flex min-h-0 flex-1 overflow-hidden rounded-lg border'>
         <ResizablePanelGroup direction='horizontal'>
           {/* The panel clips by default; the sidebar is taller than the window
