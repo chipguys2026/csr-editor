@@ -78,7 +78,7 @@ const fieldLabel = (reg, field) =>
  */
 const fieldException = (reg, field, target) => {
   const label = fieldLabel(reg, field)
-  const blocker = quasiStaticBlocker(field.access)
+  const blocker = quasiStaticBlocker(field.access, field)
 
   if (blocker) {
     return {

@@ -45,6 +45,14 @@ export const accessTypes = [
     description: 'Sticky status set by hardware; host writes 0 to clear.',
   },
   {
+    value: 'W2C',
+    port: 'out+set',
+    readable: true,
+    description:
+      'Sticky status set by hardware; any host write clears it, whatever ' +
+      'the data. Only the byte lanes the write enables are cleared.',
+  },
+  {
     value: 'W1P',
     port: 'out',
     readable: false,
@@ -70,7 +78,13 @@ export const accessTypes = [
  * all, and no timing report will say so. A status bit hardware drives is
  * simply moving, which is the opposite of the claim.
  */
-export const quasiStaticBlocker = (access) => {
+export const quasiStaticBlocker = (access, field = null) => {
+  // A field the hardware writes is moving by definition. This covers the
+  // optional strobes on RW/WO, which the type alone does not tell us about.
+  if (field?.hwSet || field?.hwClear) {
+    return 'written by hardware during operation, so it is not held still'
+  }
+
   switch (access) {
     case 'RW':
     case 'WO':
@@ -79,6 +93,7 @@ export const quasiStaticBlocker = (access) => {
       return 'driven from outside - no field flop to cut'
     case 'W1C':
     case 'W0C':
+    case 'W2C':
       return 'set by hardware during operation, so it is not held still'
     case 'W1S':
       return 'cleared by hardware during operation, so it is not held still'
@@ -90,6 +105,55 @@ export const quasiStaticBlocker = (access) => {
       return 'not a type that holds a value'
   }
 }
+
+/**
+ * Which hardware strobes a type's storage can take, and whether they come
+ * with the type or are opt-in per field.
+ *
+ *   'always'   - the semantics require it: a W1C bit is set by hardware, a
+ *                W1S bit is cleared by hardware.
+ *   'optional' - the document may ask for the extra port on this one field.
+ *   'never'    - there is no stored value to strobe.
+ *
+ * The value itself is always the field flop and always leaves through `<sig>_o`;
+ * these are inputs that write it, never another output.
+ */
+export const hardwareStrobes = {
+  RW: { set: 'optional', clear: 'optional' },
+  WO: { set: 'optional', clear: 'optional' },
+  W1C: { set: 'always', clear: 'optional' },
+  W0C: { set: 'always', clear: 'optional' },
+  W2C: { set: 'always', clear: 'optional' },
+  W1S: { set: 'optional', clear: 'always' },
+  RO: { set: 'never', clear: 'never' },
+  W1P: { set: 'never', clear: 'never' },
+  W1SC: { set: 'never', clear: 'never' },
+}
+
+/** The strobe rules for an access type, defaulting to no storage at all. */
+export const hardwareStrobeRule = (access) =>
+  hardwareStrobes[access] ?? hardwareStrobes.RO
+
+/**
+ * The strobe ports a field gets, from its type widened by its own flags.
+ * `field` may be the document field or the resolved model field.
+ */
+export const fieldStrobes = (field) => {
+  const rule = hardwareStrobeRule(field?.type ?? field?.access)
+
+  return {
+    set: rule.set === 'always' || (rule.set === 'optional' && Boolean(field?.hwSet)),
+    clear:
+      rule.clear === 'always' ||
+      (rule.clear === 'optional' && Boolean(field?.hwClear)),
+  }
+}
+
+/** Why a strobe cannot be offered on this type, or null when it can. */
+export const hardwareStrobeBlocker = (access, which) =>
+  hardwareStrobeRule(access)[which] === 'never'
+    ? `${access} has no stored value to ${which === 'set' ? 'set' : 'clear'}`
+    : null
 
 export const accessTypeValues = accessTypes.map((type) => type.value)
 
@@ -112,6 +176,7 @@ export const accessColorMap = {
   W1C: 'fill-pink-200 bg-pink-200 dark:fill-pink-400 dark:bg-pink-400',
   W1S: 'fill-teal-200 bg-teal-200 dark:fill-teal-400 dark:bg-teal-400',
   W0C: 'fill-rose-200 bg-rose-200 dark:fill-rose-400 dark:bg-rose-400',
+  W2C: 'fill-fuchsia-200 bg-fuchsia-200 dark:fill-fuchsia-400 dark:bg-fuchsia-400',
   W1P: 'fill-purple-200 bg-purple-200 dark:fill-purple-400 dark:bg-purple-400',
   W1SC: 'fill-orange-200 bg-orange-200 dark:fill-orange-400 dark:bg-orange-400',
   RSVD: 'fill-neutral-200 bg-neutral-200 dark:fill-neutral-400 dark:bg-neutral-400',

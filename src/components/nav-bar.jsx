@@ -379,7 +379,8 @@ export const NavBar = () => {
                 <ul className='list-disc space-y-1 pl-5'>
                   <li>Edit registers, fields, reset values, and bit ranges</li>
                   <li>
-                    Model RW, RO, WO, W1C, W0C, W1P, and W1SC field behaviour
+                    Model RW, RO, WO, W1C, W0C, W2C, W1P, and W1SC field
+                    behaviour, with optional hardware set/clear strobes
                   </li>
                   <li>
                     Configure module name, data width, address width, and

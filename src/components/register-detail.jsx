@@ -14,7 +14,12 @@ import {
   resolveFields,
   resolveWidth,
 } from '@/lib/register'
-import { accessTypes, holdCyclesOf, quasiStaticBlocker } from '@/lib/access-types'
+import {
+  accessTypes,
+  hardwareStrobeRule,
+  holdCyclesOf,
+  quasiStaticBlocker,
+} from '@/lib/access-types'
 import { buildAddressMap } from '@/lib/address-map'
 import { deleteRegister } from '@/lib/delete-register'
 import { cn } from '@/lib/utils'
@@ -319,9 +324,25 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
       onValueChange={(v) => {
         setValue(path, v, { shouldDirty: true })
 
-        // Retyping a held field into a strobe must not carry its tick over.
+        // Retyping a field must not carry over a tick the new type has no
+        // place for, neither a quasi-static claim nor a strobe the type
+        // cannot physically take.
         if (quasiStaticBlocker(v)) {
           setValue(`fields.${field.trueIndex}.quasiStatic`, false, {
+            shouldDirty: true,
+          })
+        }
+
+        const rule = hardwareStrobeRule(v)
+
+        if (rule.set === 'never') {
+          setValue(`fields.${field.trueIndex}.hwSet`, false, {
+            shouldDirty: true,
+          })
+        }
+
+        if (rule.clear === 'never') {
+          setValue(`fields.${field.trueIndex}.hwClear`, false, {
             shouldDirty: true,
           })
         }
@@ -387,7 +408,11 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
  */
 const FieldQuasiStatic = ({ field, isEditing, watch, setValue }) => {
   const path = `fields.${field.trueIndex}.quasiStatic`
-  const blocker = quasiStaticBlocker(field.type)
+  // A field the logic writes is not held still, whatever its type says.
+  const blocker = quasiStaticBlocker(field.type, {
+    hwSet: watch(`fields.${field.trueIndex}.hwSet`),
+    hwClear: watch(`fields.${field.trueIndex}.hwClear`),
+  })
 
   // A dash rather than an unticked box: an empty checkbox reads as "not set
   // yet", which would invite clicking at the one thing that must not be.
@@ -416,6 +441,90 @@ const FieldQuasiStatic = ({ field, isEditing, watch, setValue }) => {
       // Ticks stay legible in view mode; the cursor is what says it is locked.
       className='disabled:cursor-default disabled:opacity-100'
     />
+  )
+}
+
+/**
+ * The optional hardware strobes: what the logic itself can write, beyond what
+ * the access type already implies. A W1C/W0C/W2C is set by hardware and a W1S
+ * is cleared by hardware, so only the extra direction is offered; RW/WO store a
+ * plain value, so either direction is a choice.
+ *
+ * The value is always the field flop, and always leaves through the field
+ * output. These tick-boxes add inputs that write it, never another output.
+ */
+const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
+  const type = watch(`fields.${field.trueIndex}.type`) ?? field.type
+  const rule = hardwareStrobeRule(type)
+
+  const cell = (which) => {
+    const label = which === 'set' ? 'set' : 'clr'
+    const path = `fields.${field.trueIndex}.hw${which === 'set' ? 'Set' : 'Clear'}`
+
+    // No flop to strobe: a dash, never a tick box that could be misread.
+    if (rule[which] === 'never') {
+      return (
+        <span
+          className='text-muted-foreground'
+          title={`No hardware ${which === 'set' ? 'set' : 'clear'} on ${type}: the field stores no value`}
+        >
+          &ndash;
+        </span>
+      )
+    }
+
+    // Comes with the type: the port is always there, so the box is ticked
+    // and locked rather than an empty box that invites a click.
+    if (rule[which] === 'always') {
+      return (
+        <label
+          className='flex cursor-default items-center gap-0.5'
+          title={`${type} is ${which === 'set' ? 'set' : 'cleared'} by hardware, so this port is always present`}
+        >
+          <input
+            type='checkbox'
+            checked
+            readOnly
+            disabled
+            data-row={field.trueIndex}
+            data-col={which === 'set' ? 'hwSet' : 'hwClear'}
+            className='disabled:cursor-default disabled:opacity-100'
+          />
+          <span className='text-muted-foreground font-mono text-[10px] uppercase'>
+            {label}
+          </span>
+        </label>
+      )
+    }
+
+    return (
+      <label
+        className='flex cursor-pointer items-center gap-0.5'
+        title={`Add ${field.sig ?? field.name}_${which}_i so the logic can ${which} it`}
+      >
+        <input
+          type='checkbox'
+          checked={Boolean(watch(path))}
+          disabled={!isEditing}
+          data-row={field.trueIndex}
+          data-col={which === 'set' ? 'hwSet' : 'hwClear'}
+          onChange={(event) =>
+            setValue(path, event.target.checked, { shouldDirty: true })
+          }
+          className='disabled:cursor-default disabled:opacity-100'
+        />
+        <span className='text-muted-foreground font-mono text-[10px] uppercase'>
+          {label}
+        </span>
+      </label>
+    )
+  }
+
+  return (
+    <div className='flex items-center justify-center gap-2'>
+      {cell('set')}
+      {cell('clear')}
+    </div>
   )
 }
 
@@ -1429,6 +1538,12 @@ export const RegisterDetail = () => {
                 Quasistatic
               </TableHead>
               <TableHead
+                className='w-24 text-center'
+                title='Optional hardware strobes: inputs the logic uses to set or clear the field value'
+              >
+                Hardware
+              </TableHead>
+              <TableHead
                 className='text-right font-mono'
                 style={{ width: `calc(${resetColumnChars}ch + 2rem)` }}
               >
@@ -1504,6 +1619,8 @@ export const RegisterDetail = () => {
                           {field.type}
                         </Badge>
                       </TableCell>
+
+                      <TableCell />
 
                       <TableCell />
 
@@ -1591,6 +1708,15 @@ export const RegisterDetail = () => {
 
                       <TableCell className='text-center align-top'>
                         <FieldQuasiStatic
+                          field={field}
+                          isEditing={isEditing}
+                          watch={watch}
+                          setValue={setValue}
+                        />
+                      </TableCell>
+
+                      <TableCell className='text-center align-top'>
+                        <FieldHardwareStrobes
                           field={field}
                           isEditing={isEditing}
                           watch={watch}

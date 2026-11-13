@@ -2,6 +2,8 @@
 import {
   accessTypeMap,
   accessTypeValues,
+  fieldStrobes,
+  hardwareStrobeRule,
   holdCounterWidth,
   holdCyclesOf,
 } from './access-types.js'
@@ -101,7 +103,7 @@ const RESERVED_PARAMETERS = ['ADDR_WIDTH', 'DATA_WIDTH']
 // Fields that are stored by the shared write case block. W1C/W0C/W1SC own their
 // own always block because their update rule is not a plain wdata capture.
 const isStored = (access) => ['RW', 'WO', 'W1P'].includes(access)
-const isSticky = (access) => ['W1C', 'W0C'].includes(access)
+const isSticky = (access) => ['W1C', 'W0C', 'W2C'].includes(access)
 
 /**
  * The write assignment for a field the shared case block stores, masked so a
@@ -235,7 +237,11 @@ const collectPorts = (regs) => {
         comment: label,
       })
 
-      if (meta.port === 'out+set') {
+      // What the type implies plus whatever this field asked for: a W1C set,
+      // an extra clear, or either on a stored RW/WO word.
+      const strobes = fieldStrobes(field)
+
+      if (strobes.set) {
         inputs.push({
           name: `${field.sig}_set_i`,
           dir: 'input',
@@ -246,7 +252,7 @@ const collectPorts = (regs) => {
         })
       }
 
-      if (meta.port === 'out+clr') {
+      if (strobes.clear) {
         inputs.push({
           name: `${field.sig}_clr_i`,
           dir: 'input',
@@ -558,6 +564,12 @@ export const buildRegisterModel = (params = {}, registerMap = {}) => {
         // Held still during operation, so the SDC generator cuts timing on it.
         // Carries no weight in the RTL itself.
         quasiStatic: Boolean(field?.quasiStatic),
+        // Hardware strobes beyond what the access type already implies: a
+        // clear on a W1C/W0C/W2C or a set on a W1S, or either on RW/WO. The
+        // value stays the field flop and leaves through <sig>_o; these are
+        // inputs that write it, never another output.
+        hwSet: Boolean(field?.hwSet),
+        hwClear: Boolean(field?.hwClear),
         // Named values the field can hold, emitted as localparams so the RTL
         // can be read against the same names software uses.
         enumValues: (field?.enumValues ?? []).map((entry) => ({
@@ -731,6 +743,26 @@ export const buildRegisterModel = (params = {}, registerMap = {}) => {
         }
       }
 
+      const strobeRule = hardwareStrobeRule(field.access)
+
+      if (field.hwSet && strobeRule.set === 'never') {
+        throw new Error(
+          `${reg.name}.${field.name}: hwSet is not valid on ${field.access} fields, which store no value`
+        )
+      }
+
+      if (field.hwClear && strobeRule.clear === 'never') {
+        throw new Error(
+          `${reg.name}.${field.name}: hwClear is not valid on ${field.access} fields, which store no value`
+        )
+      }
+
+      if ((field.hwSet || field.hwClear) && reg.array && isStored(field.access)) {
+        throw new Error(
+          `${reg.name}.${field.name}: hardware strobes on a stored field inside an array are not supported yet`
+        )
+      }
+
       if (['W1P', 'W1SC'].includes(field.access) && field.reset !== 0) {
         throw new Error(
           `${reg.name}.${field.name}: ${field.access} fields are self-clearing and need resetValue 0`
@@ -800,19 +832,34 @@ const renderParameterDecls = (parameters) =>
     `    parameter ${parameter.name} = ${parameter.value}${index < parameters.length - 1 ? ',' : ''}`,
   ])
 
-/** W1C/W0C sticky bits: hardware sets, the host clears by writing 1 (or 0). */
+/** W1C/W0C/W2C sticky bits: hardware sets, the host clears. */
 const renderStickyBlock = (lines, reg, field) => {
   const sig = field.sig
-  // Bits the host is clearing this cycle: the written pattern for W1C, its
-  // inverse for W0C, and in both cases only where a byte lane is enabled.
+  const strobes = fieldStrobes(field)
+  // Bits the host is clearing this cycle, and only where a byte lane is
+  // enabled: the written pattern for W1C, its inverse for W0C, and for W2C
+  // whatever the data, because the write itself is what clears it.
   const clrExpr =
     field.access === 'W1C'
       ? maskedWdata(field)
-      : `(~csr_wdata_i${fieldSel(field)} & ${fieldMask(field)})`
+      : field.access === 'W0C'
+        ? `(~csr_wdata_i${fieldSel(field)} & ${fieldMask(field)})`
+        : fieldMask(field)
+  const hostClear =
+    field.access === 'W1C'
+      ? `by writing 1 to ${reg.name}${fieldSel(field)}`
+      : field.access === 'W0C'
+        ? `by writing 0 to ${reg.name}${fieldSel(field)}`
+        : `with any write to ${reg.name}${fieldSel(field)}`
   const header = [
     '',
     `  // ${reg.name}${reg.array ? '[]' : ''}.${field.name} (${field.access}): set by hardware strobe ${sig}_set_i;`,
-    `  // the host clears it by writing ${field.access === 'W1C' ? '1' : '0'} to ${reg.name}${fieldSel(field)}.`,
+    `  // the host clears it ${hostClear}.`,
+    ...(strobes.clear
+      ? [
+          `  // Hardware can also clear it through ${sig}_clr_i; a set in the same cycle still wins.`,
+        ]
+      : []),
   ]
 
   if (reg.array) {
@@ -829,9 +876,13 @@ const renderStickyBlock = (lines, reg, field) => {
       '      // Clear before set so an event coincident with a host clear is not lost.',
       `      ${arrayLoopHeader(reg)} begin`,
       `        if (csr_wr_en_i && csr_addr_i == ${arrayAddrExpr(reg)}) begin`,
-      `          ${element} <= (${element} & ~${clrExpr}) | ${sig}_set_i[${ARRAY_INDEX}];`,
+      strobes.clear
+        ? `          ${element} <= (${element} & ~(${clrExpr} | ${sig}_clr_i[${ARRAY_INDEX}])) | ${sig}_set_i[${ARRAY_INDEX}];`
+        : `          ${element} <= (${element} & ~${clrExpr}) | ${sig}_set_i[${ARRAY_INDEX}];`,
       '        end else begin',
-      `          ${element} <= ${element} | ${sig}_set_i[${ARRAY_INDEX}];`,
+      strobes.clear
+        ? `          ${element} <= (${element} & ~${sig}_clr_i[${ARRAY_INDEX}]) | ${sig}_set_i[${ARRAY_INDEX}];`
+        : `          ${element} <= ${element} | ${sig}_set_i[${ARRAY_INDEX}];`,
       '        end',
       '      end',
       '    end',
@@ -850,7 +901,9 @@ const renderStickyBlock = (lines, reg, field) => {
     `      ${sig}_o <= ${fieldReset(field)};`,
     '    end else begin',
     '      // Clear before set so an event coincident with a host clear is not lost.',
-    `      ${sig}_o <= (${sig}_o & ~${sig}_clr_w) | ${sig}_set_i;`,
+    strobes.clear
+      ? `      ${sig}_o <= (${sig}_o & ~(${sig}_clr_w | ${sig}_clr_i)) | ${sig}_set_i;`
+      : `      ${sig}_o <= (${sig}_o & ~${sig}_clr_w) | ${sig}_set_i;`,
     '    end',
     '  end'
   )
@@ -859,11 +912,15 @@ const renderStickyBlock = (lines, reg, field) => {
 /** W1S: the host sets bits by writing 1, and hardware clears them again. */
 const renderSetBlock = (lines, reg, field) => {
   const sig = field.sig
+  const strobes = fieldStrobes(field)
   const setExpr = maskedWdata(field)
   const header = [
     '',
     `  // ${reg.name}${reg.array ? '[]' : ''}.${field.name} (W1S): the host sets a bit by writing 1;`,
     `  // hardware clears it again through ${sig}_clr_i.`,
+    ...(strobes.set
+      ? [`  // Hardware can also set it through ${sig}_set_i; a clear in the same cycle still yields.`]
+      : []),
   ]
 
   if (reg.array) {
@@ -880,9 +937,13 @@ const renderSetBlock = (lines, reg, field) => {
       '      // Set after clear so a host set coincident with a clear still takes.',
       `      ${arrayLoopHeader(reg)} begin`,
       `        if (csr_wr_en_i && csr_addr_i == ${arrayAddrExpr(reg)}) begin`,
-      `          ${element} <= (${element} & ~${sig}_clr_i[${ARRAY_INDEX}]) | ${setExpr};`,
+      strobes.set
+        ? `          ${element} <= (${element} & ~${sig}_clr_i[${ARRAY_INDEX}]) | ${setExpr} | ${sig}_set_i[${ARRAY_INDEX}];`
+        : `          ${element} <= (${element} & ~${sig}_clr_i[${ARRAY_INDEX}]) | ${setExpr};`,
       '        end else begin',
-      `          ${element} <= ${element} & ~${sig}_clr_i[${ARRAY_INDEX}];`,
+      strobes.set
+        ? `          ${element} <= (${element} & ~${sig}_clr_i[${ARRAY_INDEX}]) | ${sig}_set_i[${ARRAY_INDEX}];`
+        : `          ${element} <= ${element} & ~${sig}_clr_i[${ARRAY_INDEX}];`,
       '        end',
       '      end',
       '    end',
@@ -901,7 +962,9 @@ const renderSetBlock = (lines, reg, field) => {
     `      ${sig}_o <= ${fieldReset(field)};`,
     '    end else begin',
     '      // Set after clear so a host set coincident with a clear still takes.',
-    `      ${sig}_o <= (${sig}_o & ~${sig}_clr_i) | ${sig}_set_w;`,
+    strobes.set
+      ? `      ${sig}_o <= (${sig}_o & ~${sig}_clr_i) | ${sig}_set_w | ${sig}_set_i;`
+      : `      ${sig}_o <= (${sig}_o & ~${sig}_clr_i) | ${sig}_set_w;`,
     '    end',
     '  end'
   )
@@ -1260,10 +1323,45 @@ const renderCsrBlock = ({
       '            // no-op for unmapped writes',
       '          end',
       '        endcase',
-      '      end',
-      '    end',
-      '  end'
+      '      end'
     )
+
+    // Hardware strobes on stored RW/WO words. They are honoured every cycle
+    // except the one the host writes this register, so a host write has the
+    // last word and the two paths never drive the flop at once.
+    const storedStrobes = scalarRegs.flatMap((reg) =>
+      reg.fields
+        .filter((field) => isStored(field.access) && (field.hwSet || field.hwClear))
+        .map((field) => ({ reg, field }))
+    )
+
+    if (storedStrobes.length > 0) {
+      lines.push('')
+
+      for (const { reg, field } of storedStrobes) {
+        const strobes = fieldStrobes(field)
+        const actions = [strobes.clear ? 'clear' : null, strobes.set ? 'set' : null]
+          .filter(Boolean)
+          .join(' or ')
+        const value =
+          strobes.set && strobes.clear
+            ? `(${field.sig}_o & ~${field.sig}_clr_i) | ${field.sig}_set_i`
+            : strobes.set
+              ? `${field.sig}_o | ${field.sig}_set_i`
+              : `${field.sig}_o & ~${field.sig}_clr_i`
+
+        lines.push(
+          `      // ${reg.name}.${field.name} (${field.access}): the logic may also ${actions} it;`,
+          '      // a host write in the same cycle wins.',
+          `      if (!(csr_wr_en_i && csr_addr_i == ${reg.constName}_ADDR)) begin`,
+          `        ${field.sig}_o <= ${value};`,
+          '      end',
+          ''
+        )
+      }
+    }
+
+    lines.push('    end', '  end')
   }
 
   lines.push(

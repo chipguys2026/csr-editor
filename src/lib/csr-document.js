@@ -60,6 +60,11 @@ const fieldRow = (field) => {
       field.type === 'RO' && field.constant
         ? 'Constant: reads back its reset value.'
         : null,
+      field.type === 'W2C'
+        ? 'Any write clears it, whatever the data.'
+        : null,
+      field.hwSet ? 'Hardware can also set it.' : null,
+      field.hwClear ? 'Hardware can also clear it.' : null,
     ].filter(Boolean),
     enumValues: reserved
       ? []

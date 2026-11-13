@@ -8,7 +8,7 @@ synthesizable RTL, a C header, timing constraints, a spreadsheet and a datasheet
 
 - **Register map editor.** Add, move, search and delete registers. Supports register arrays, and flags fields that no longer fit the data width.
 - **Field editor.** Drag fields to reorder them, set bit ranges (including parameterized ones), reset values and descriptions, and name individual values or bits.
-- **Access types.** `RW`, `RO`, `WO`, `W1C`, `W1S`, `W0C`, `W1P` (pulse) and `W1SC` (self-clearing with a per-field hold window).
+- **Access types.** `RW`, `RO`, `WO`, `W1C`, `W0C`, `W2C` (any write clears), `W1S`, `W1P` (pulse) and `W1SC` (self-clearing with a per-field hold window). Sticky fields can also take an optional hardware set/clear strobe, and stored `RW`/`WO` fields either.
 - **Bus interfaces.** Native, AXI4-Lite and Avalon-MM, with write strobes / byte enables.
 - **Generated outputs:**
   - **RTL.** A SystemVerilog CSR block, plus a package of named field values.
