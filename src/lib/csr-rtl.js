@@ -2,6 +2,8 @@
 import {
   accessTypeMap,
   accessTypeValues,
+  externalBlocker,
+  externalWrite,
   fieldStrobes,
   hardwareStrobeRule,
   holdCounterWidth,
@@ -105,6 +107,47 @@ const RESERVED_PARAMETERS = ['ADDR_WIDTH', 'DATA_WIDTH']
 const isStored = (access) => ['RW', 'WO', 'W1P'].includes(access)
 const isSticky = (access) => ['W1C', 'W0C', 'W2C'].includes(access)
 
+// A field the block keeps a flop for. An external field keeps none: its write
+// leaves as a request and its value comes back in (see externalWrite).
+const ownsFlop = (field) => !field.external
+const isStoredHere = (field) => ownsFlop(field) && isStored(field.access)
+
+/**
+ * The request an external field hands on for a host write, in the enabled
+ * lanes only, mirroring what the type would have done to its own flop.
+ */
+const externalRequest = (field) => {
+  switch (field.access) {
+    case 'W1C':
+    case 'W1S':
+      return maskedWdata(field)
+    case 'W0C':
+      return `(~csr_wdata_i${fieldSel(field)} & ${fieldMask(field)})`
+    case 'W2C':
+      return fieldMask(field)
+    default:
+      return null
+  }
+}
+
+/** The outputs an external field drives, as [suffix, width, comment]. */
+const externalOutputs = (field) => {
+  switch (externalWrite[field.access]) {
+    case 'data':
+      return [
+        ['wr', 1, 'host write strobe'],
+        ['wdata', field.width, 'host write data'],
+        ['wmask', field.width, 'host write bit mask (enabled byte lanes)'],
+      ]
+    case 'clear':
+      return [['clr', field.width, 'host clear request']]
+    case 'set':
+      return [['set', field.width, 'host set request']]
+    default:
+      return []
+  }
+}
+
 /**
  * The write assignment for a field the shared case block stores, masked so a
  * disabled byte lane is left as it was. A W1P pulse takes the masked data
@@ -134,6 +177,11 @@ const readbackSignal = (field) => {
   const meta = accessTypeMap[field.access]
   if (!meta?.readable) {
     return null
+  }
+
+  // Held outside: the logic that keeps it answers the read.
+  if (field.external) {
+    return `${field.sig}_i`
   }
 
   if (field.access === 'RO') {
@@ -210,6 +258,31 @@ const collectPorts = (regs) => {
     for (const field of reg.fields) {
       const meta = accessTypeMap[field.access]
       const label = `${reg.name}${reg.array ? '[]' : ''}.${field.name} (${field.access})`
+
+      if (field.external) {
+        for (const [suffix, width, what] of externalOutputs(field)) {
+          outputs.push({
+            name: `${field.sig}_${suffix}_o`,
+            dir: 'output',
+            width,
+            widthExpr: width === 1 ? null : field.widthExpr,
+            arrayDim,
+            comment: `${label} external: ${what}`,
+          })
+        }
+
+        if (meta.readable) {
+          inputs.push({
+            name: `${field.sig}_i`,
+            dir: 'input',
+            width: field.width,
+            widthExpr: field.widthExpr,
+            arrayDim,
+            comment: `${label} external: value read back`,
+          })
+        }
+        continue
+      }
 
       if (meta.port === 'in') {
         // A constant field is tied off inside the block, so it has no port.
@@ -570,6 +643,9 @@ export const buildRegisterModel = (params = {}, registerMap = {}) => {
         // inputs that write it, never another output.
         hwSet: Boolean(field?.hwSet),
         hwClear: Boolean(field?.hwClear),
+        // Stored outside the block: the type is the bus behaviour, and the
+        // block hands writes on and reads the value back (externalWrite).
+        external: Boolean(field?.external),
         // Named values the field can hold, emitted as localparams so the RTL
         // can be read against the same names software uses.
         enumValues: (field?.enumValues ?? []).map((entry) => ({
@@ -761,6 +837,26 @@ export const buildRegisterModel = (params = {}, registerMap = {}) => {
         throw new Error(
           `${reg.name}.${field.name}: hardware strobes on a stored field inside an array are not supported yet`
         )
+      }
+
+      if (field.external) {
+        const blocker = externalBlocker(field.access)
+
+        if (blocker) {
+          throw new Error(`${reg.name}.${field.name}: external is not valid here: ${blocker}`)
+        }
+
+        if (field.hwSet || field.hwClear) {
+          throw new Error(
+            `${reg.name}.${field.name}: an external field has no flop for hardware strobes; the logic that holds it sets and clears it`
+          )
+        }
+
+        if (reg.array) {
+          throw new Error(
+            `${reg.name}.${field.name}: external fields inside an array are not supported yet`
+          )
+        }
       }
 
       if (['W1P', 'W1SC'].includes(field.access) && field.reset !== 0) {
@@ -1079,8 +1175,14 @@ const renderCsrBlock = ({
   const storedFields = []
   const pulseFields = []
 
+  const externalFields = []
+
   for (const reg of scalarRegs) {
     for (const field of reg.fields) {
+      if (field.external) {
+        externalFields.push({ reg, field })
+        continue
+      }
       if (isStored(field.access)) {
         storedFields.push({ reg, field })
       }
@@ -1167,7 +1269,7 @@ const renderCsrBlock = ({
   }
 
   for (const reg of regs) {
-    for (const field of reg.fields) {
+    for (const field of reg.fields.filter(ownsFlop)) {
       if (isSticky(field.access)) {
         renderStickyBlock(lines, reg, field)
       } else if (field.access === 'W1S') {
@@ -1178,7 +1280,12 @@ const renderCsrBlock = ({
     }
   }
 
-  if (storedFields.length > 0 || storedArrayRegs.length > 0 || strobeRegs.length > 0) {
+  if (
+    storedFields.length > 0 ||
+    storedArrayRegs.length > 0 ||
+    strobeRegs.length > 0 ||
+    externalFields.length > 0
+  ) {
     lines.push('', '  // CSR write handling', '  always @(posedge clk_i or negedge rstn_i) begin')
     lines.push('    if (!rstn_i) begin')
 
@@ -1196,6 +1303,14 @@ const renderCsrBlock = ({
         `        ${strobeSignal(reg)}[${ARRAY_INDEX}] <= 1'b0;`,
         '      end'
       )
+    }
+
+    for (const { field } of externalFields) {
+      for (const [suffix, width] of externalOutputs(field)) {
+        lines.push(
+          `      ${field.sig}_${suffix}_o <= ${width === 1 ? "1'b0" : fieldZero(field)};`
+        )
+      }
     }
 
     for (const reg of storedArrayRegs) {
@@ -1259,6 +1374,24 @@ const renderCsrBlock = ({
       lines.push('')
     }
 
+    if (externalFields.length > 0) {
+      lines.push(
+        '      // External fields: their requests are single cycle, so default them',
+        '      // low every clock; the write data and mask hold until the next write.'
+      )
+
+      for (const { field } of externalFields) {
+        if (externalWrite[field.access] === 'data') {
+          lines.push(`      ${field.sig}_wr_o <= 1'b0;`)
+        } else {
+          const [suffix] = externalOutputs(field)[0]
+          lines.push(`      ${field.sig}_${suffix}_o <= ${fieldZero(field)};`)
+        }
+      }
+
+      lines.push('')
+    }
+
     if (pulseFields.length > 0 || pulseArrayRegs.length > 0) {
       lines.push('      // Write-1 pulses are single cycle: default them low every clock.')
 
@@ -1301,14 +1434,28 @@ const renderCsrBlock = ({
     lines.push('        case (csr_addr_i)')
 
     for (const reg of scalarRegs) {
-      const written = reg.fields.filter((field) => isStored(field.access))
-      if (written.length === 0 && !needsStrobe(reg)) {
+      const written = reg.fields.filter(isStoredHere)
+      const handedOn = reg.fields.filter((field) => field.external)
+      if (written.length === 0 && handedOn.length === 0 && !needsStrobe(reg)) {
         continue
       }
 
       lines.push(`          ${reg.constName}_ADDR: begin`)
       for (const field of written) {
         lines.push(`            ${storedUpdate(field)}`)
+      }
+
+      for (const field of handedOn) {
+        if (externalWrite[field.access] === 'data') {
+          lines.push(
+            `            ${field.sig}_wr_o <= 1'b1;`,
+            `            ${field.sig}_wdata_o <= csr_wdata_i${fieldSel(field)};`,
+            `            ${field.sig}_wmask_o <= ${fieldMask(field)};`
+          )
+        } else {
+          const [suffix] = externalOutputs(field)[0]
+          lines.push(`            ${field.sig}_${suffix}_o <= ${externalRequest(field)};`)
+        }
       }
 
       if (needsStrobe(reg)) {

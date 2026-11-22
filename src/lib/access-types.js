@@ -79,6 +79,12 @@ export const accessTypes = [
  * simply moving, which is the opposite of the claim.
  */
 export const quasiStaticBlocker = (access, field = null) => {
+  // Its value lives in the logic outside the block, so there is no field flop
+  // here to cut; whatever holds it is constrained where it is.
+  if (field?.external) {
+    return 'stored outside the CSR block - no field flop to cut'
+  }
+
   // A field the hardware writes is moving by definition. This covers the
   // optional strobes on RW/WO, which the type alone does not tell us about.
   if (field?.hwSet || field?.hwClear) {
@@ -154,6 +160,52 @@ export const hardwareStrobeBlocker = (access, which) =>
   hardwareStrobeRule(access)[which] === 'never'
     ? `${access} has no stored value to ${which === 'set' ? 'set' : 'clear'}`
     : null
+
+/**
+ * External fields: the bus behaviour of the access type, with the value held
+ * outside the generated block. The block still decodes the address and the
+ * byte lanes, then hands the write on as a one-cycle request and reads the
+ * value back from an input. This is for a word whose storage the block cannot
+ * describe: several copies behind one address chosen by other state, a write
+ * the logic may refuse, or a count kept inside another unit.
+ *
+ * Per type, what the block hands on (all registered, one clock after the
+ * write, and low otherwise):
+ *
+ *   RW / WO          <sig>_wr_o pulse, <sig>_wdata_o, <sig>_wmask_o
+ *   W1C              <sig>_clr_o = written ones in the enabled lanes
+ *   W0C              <sig>_clr_o = written zeros in the enabled lanes
+ *   W2C              <sig>_clr_o = every bit of the enabled lanes
+ *   W1S              <sig>_set_o = written ones in the enabled lanes
+ *
+ * Every readable external field reads back <sig>_i.
+ */
+export const externalWrite = {
+  RW: 'data',
+  WO: 'data',
+  W1C: 'clear',
+  W0C: 'clear',
+  W2C: 'clear',
+  W1S: 'set',
+}
+
+/** Why a field of this type cannot be external, or null when it can. */
+export const externalBlocker = (access) => {
+  if (externalWrite[access]) {
+    return null
+  }
+
+  switch (access) {
+    case 'RO':
+      return 'RO already reads its value from outside the block'
+    case 'W1P':
+      return 'W1P stores nothing - its pulse already leaves the block'
+    case 'W1SC':
+      return 'W1SC times its own hold window inside the block'
+    default:
+      return 'not a type that can be held outside the block'
+  }
+}
 
 export const accessTypeValues = accessTypes.map((type) => type.value)
 

@@ -16,6 +16,7 @@ import {
 } from '@/lib/register'
 import {
   accessTypes,
+  externalBlocker,
   hardwareStrobeRule,
   holdCyclesOf,
   quasiStaticBlocker,
@@ -346,6 +347,12 @@ const FieldType = ({ field, isEditing, watch, setValue }) => {
             shouldDirty: true,
           })
         }
+
+        if (externalBlocker(v)) {
+          setValue(`fields.${field.trueIndex}.external`, false, {
+            shouldDirty: true,
+          })
+        }
       }}
     >
       <SelectTrigger
@@ -412,6 +419,7 @@ const FieldQuasiStatic = ({ field, isEditing, watch, setValue }) => {
   const blocker = quasiStaticBlocker(field.type, {
     hwSet: watch(`fields.${field.trueIndex}.hwSet`),
     hwClear: watch(`fields.${field.trueIndex}.hwClear`),
+    external: watch(`fields.${field.trueIndex}.external`),
   })
 
   // A dash rather than an unticked box: an empty checkbox reads as "not set
@@ -456,10 +464,25 @@ const FieldQuasiStatic = ({ field, isEditing, watch, setValue }) => {
 const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
   const type = watch(`fields.${field.trueIndex}.type`) ?? field.type
   const rule = hardwareStrobeRule(type)
+  const externalPath = `fields.${field.trueIndex}.external`
+  const external = Boolean(watch(externalPath))
+  const externalReason = externalBlocker(type)
 
   const cell = (which) => {
     const label = which === 'set' ? 'set' : 'clr'
     const path = `fields.${field.trueIndex}.hw${which === 'set' ? 'Set' : 'Clear'}`
+
+    // Held outside the block: there is no flop here for a strobe to write.
+    if (external) {
+      return (
+        <span
+          className='text-muted-foreground'
+          title='External: the logic that holds the value sets and clears it'
+        >
+          &ndash;
+        </span>
+      )
+    }
 
     // No flop to strobe: a dash, never a tick box that could be misread.
     if (rule[which] === 'never') {
@@ -520,10 +543,52 @@ const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
     )
   }
 
+  // External: the block keeps no flop for the field. It decodes the write and
+  // hands it on (<sig>_wr_o/_wdata_o/_wmask_o, or a _clr_o/_set_o request),
+  // and reads the value back from <sig>_i.
+  const externalCell = externalReason ? (
+    <span
+      className='text-muted-foreground'
+      title={`Not available on ${type}: ${externalReason}`}
+    >
+      &ndash;
+    </span>
+  ) : (
+    <label
+      className='flex cursor-pointer items-center gap-0.5'
+      title='External: hold the value outside the CSR block; the block hands writes on and reads it back from an input'
+    >
+      <input
+        type='checkbox'
+        checked={external}
+        disabled={!isEditing}
+        data-row={field.trueIndex}
+        data-col='external'
+        onChange={(event) => {
+          setValue(externalPath, event.target.checked, { shouldDirty: true })
+
+          // No flop left to strobe or to cut.
+          if (event.target.checked) {
+            for (const flag of ['hwSet', 'hwClear', 'quasiStatic']) {
+              setValue(`fields.${field.trueIndex}.${flag}`, false, {
+                shouldDirty: true,
+              })
+            }
+          }
+        }}
+        className='disabled:cursor-default disabled:opacity-100'
+      />
+      <span className='text-muted-foreground font-mono text-[10px] uppercase'>
+        ext
+      </span>
+    </label>
+  )
+
   return (
     <div className='flex items-center justify-center gap-2'>
       {cell('set')}
       {cell('clear')}
+      {externalCell}
     </div>
   )
 }
@@ -1538,8 +1603,8 @@ export const RegisterDetail = () => {
                 Quasistatic
               </TableHead>
               <TableHead
-                className='w-24 text-center'
-                title='Optional hardware strobes: inputs the logic uses to set or clear the field value'
+                className='w-32 text-center'
+                title='Optional hardware strobes (set/clr), or ext: the value is held outside the CSR block'
               >
                 Hardware
               </TableHead>

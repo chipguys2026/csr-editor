@@ -63,6 +63,9 @@ const fieldRow = (field) => {
       field.type === 'W2C'
         ? 'Any write clears it, whatever the data.'
         : null,
+      field.external
+        ? 'External: the value is held outside the CSR block; the type is the bus behaviour.'
+        : null,
       field.hwSet ? 'Hardware can also set it.' : null,
       field.hwClear ? 'Hardware can also clear it.' : null,
     ].filter(Boolean),

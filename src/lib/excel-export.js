@@ -14,8 +14,13 @@ import { buildAddressMap } from './address-map'
  * what gets read away from the tool, so the codes belong next to the prose
  * rather than only in the generated header.
  */
+const EXTERNAL_NOTE =
+  'External: the value is held outside the CSR block; the type is the bus behaviour.'
+
 const describeField = (field) => {
-  const desc = String(field.desc ?? '')
+  const desc = [String(field.desc ?? ''), field.external ? EXTERNAL_NOTE : '']
+    .filter(Boolean)
+    .join('\n')
   const values = field.enumValues ?? []
 
   if (values.length === 0) {
