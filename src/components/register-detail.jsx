@@ -427,7 +427,7 @@ const FieldQuasiStatic = ({ field, isEditing, watch, setValue }) => {
   if (blocker) {
     return (
       <span
-        className='text-muted-foreground'
+        className='text-muted-foreground inline-flex h-5 items-center'
         title={`Not available on ${field.type}: ${blocker}`}
       >
         &ndash;
@@ -436,19 +436,21 @@ const FieldQuasiStatic = ({ field, isEditing, watch, setValue }) => {
   }
 
   return (
-    <input
-      type='checkbox'
-      checked={Boolean(watch(path))}
-      disabled={!isEditing}
-      data-row={field.trueIndex}
-      data-col='quasiStatic'
-      title='Held still during operation: cut it in the generated SDC (set_false_path)'
-      onChange={(event) =>
-        setValue(path, event.target.checked, { shouldDirty: true })
-      }
-      // Ticks stay legible in view mode; the cursor is what says it is locked.
-      className='disabled:cursor-default disabled:opacity-100'
-    />
+    <span className='inline-flex h-5 items-center'>
+      <input
+        type='checkbox'
+        checked={Boolean(watch(path))}
+        disabled={!isEditing}
+        data-row={field.trueIndex}
+        data-col='quasiStatic'
+        title='Held still during operation: cut it in the generated SDC (set_false_path)'
+        onChange={(event) =>
+          setValue(path, event.target.checked, { shouldDirty: true })
+        }
+        // Ticks stay legible in view mode; the cursor is what says it is locked.
+        className='m-0 size-3.5 disabled:cursor-default disabled:opacity-100'
+      />
+    </span>
   )
 }
 
@@ -461,6 +463,35 @@ const FieldQuasiStatic = ({ field, isEditing, watch, setValue }) => {
  * The value is always the field flop, and always leaves through the field
  * output. These tick-boxes add inputs that write it, never another output.
  */
+/**
+ * One slot of the Hardware cell: a fixed-width indicator and its label, so the
+ * set / clr / ext columns line up from row to row whatever each one shows. An
+ * unavailable slot keeps its label, dimmed, with a dash in the box's place.
+ */
+const HardwareSlot = ({ label, title, children, available = true }) => (
+  <label
+    className={cn(
+      'inline-flex h-5 items-center gap-1',
+      available ? 'cursor-pointer' : 'cursor-default'
+    )}
+    title={title}
+  >
+    <span className='inline-flex size-3.5 items-center justify-center'>
+      {children ?? <span className='bg-muted-foreground/60 block h-px w-2' />}
+    </span>
+    <span
+      className={cn(
+        'text-muted-foreground w-6 text-left font-mono text-[10px] leading-none uppercase',
+        !available && 'opacity-40'
+      )}
+    >
+      {label}
+    </span>
+  </label>
+)
+
+const slotCheckbox = 'm-0 size-3.5 disabled:cursor-default disabled:opacity-100'
+
 const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
   const type = watch(`fields.${field.trueIndex}.type`) ?? field.type
   const rule = hardwareStrobeRule(type)
@@ -468,31 +499,30 @@ const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
   const external = Boolean(watch(externalPath))
   const externalReason = externalBlocker(type)
 
-  const cell = (which) => {
+  const strobeSlot = (which) => {
     const label = which === 'set' ? 'set' : 'clr'
+    const verb = which === 'set' ? 'set' : 'clear'
     const path = `fields.${field.trueIndex}.hw${which === 'set' ? 'Set' : 'Clear'}`
 
     // Held outside the block: there is no flop here for a strobe to write.
     if (external) {
       return (
-        <span
-          className='text-muted-foreground'
+        <HardwareSlot
+          label={label}
+          available={false}
           title='External: the logic that holds the value sets and clears it'
-        >
-          &ndash;
-        </span>
+        />
       )
     }
 
     // No flop to strobe: a dash, never a tick box that could be misread.
     if (rule[which] === 'never') {
       return (
-        <span
-          className='text-muted-foreground'
-          title={`No hardware ${which === 'set' ? 'set' : 'clear'} on ${type}: the field stores no value`}
-        >
-          &ndash;
-        </span>
+        <HardwareSlot
+          label={label}
+          available={false}
+          title={`No hardware ${verb} on ${type}: the field stores no value`}
+        />
       )
     }
 
@@ -500,8 +530,8 @@ const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
     // and locked rather than an empty box that invites a click.
     if (rule[which] === 'always') {
       return (
-        <label
-          className='flex cursor-default items-center gap-0.5'
+        <HardwareSlot
+          label={label}
           title={`${type} is ${which === 'set' ? 'set' : 'cleared'} by hardware, so this port is always present`}
         >
           <input
@@ -511,19 +541,16 @@ const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
             disabled
             data-row={field.trueIndex}
             data-col={which === 'set' ? 'hwSet' : 'hwClear'}
-            className='disabled:cursor-default disabled:opacity-100'
+            className={slotCheckbox}
           />
-          <span className='text-muted-foreground font-mono text-[10px] uppercase'>
-            {label}
-          </span>
-        </label>
+        </HardwareSlot>
       )
     }
 
     return (
-      <label
-        className='flex cursor-pointer items-center gap-0.5'
-        title={`Add ${field.sig ?? field.name}_${which}_i so the logic can ${which} it`}
+      <HardwareSlot
+        label={label}
+        title={`Add ${field.sig ?? field.name}_${which}_i so the logic can ${verb} it`}
       >
         <input
           type='checkbox'
@@ -534,28 +561,24 @@ const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
           onChange={(event) =>
             setValue(path, event.target.checked, { shouldDirty: true })
           }
-          className='disabled:cursor-default disabled:opacity-100'
+          className={slotCheckbox}
         />
-        <span className='text-muted-foreground font-mono text-[10px] uppercase'>
-          {label}
-        </span>
-      </label>
+      </HardwareSlot>
     )
   }
 
   // External: the block keeps no flop for the field. It decodes the write and
   // hands it on (<sig>_wr_o/_wdata_o/_wmask_o, or a _clr_o/_set_o request),
   // and reads the value back from <sig>_i.
-  const externalCell = externalReason ? (
-    <span
-      className='text-muted-foreground'
+  const externalSlot = externalReason ? (
+    <HardwareSlot
+      label='ext'
+      available={false}
       title={`Not available on ${type}: ${externalReason}`}
-    >
-      &ndash;
-    </span>
+    />
   ) : (
-    <label
-      className='flex cursor-pointer items-center gap-0.5'
+    <HardwareSlot
+      label='ext'
       title='External: hold the value outside the CSR block; the block hands writes on and reads it back from an input'
     >
       <input
@@ -576,19 +599,16 @@ const FieldHardwareStrobes = ({ field, isEditing, watch, setValue }) => {
             }
           }
         }}
-        className='disabled:cursor-default disabled:opacity-100'
+        className={slotCheckbox}
       />
-      <span className='text-muted-foreground font-mono text-[10px] uppercase'>
-        ext
-      </span>
-    </label>
+    </HardwareSlot>
   )
 
   return (
     <div className='flex items-center justify-center gap-2'>
-      {cell('set')}
-      {cell('clear')}
-      {externalCell}
+      {strobeSlot('set')}
+      {strobeSlot('clear')}
+      {externalSlot}
     </div>
   )
 }
@@ -1603,7 +1623,7 @@ export const RegisterDetail = () => {
                 Quasistatic
               </TableHead>
               <TableHead
-                className='w-32 text-center'
+                className='w-40 text-center'
                 title='Optional hardware strobes (set/clr), or ext: the value is held outside the CSR block'
               >
                 Hardware
